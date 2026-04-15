@@ -1,5 +1,7 @@
 # claudehud
 
+[![Scorecard](https://api.securityscorecards.dev/projects/github.com/Fyko/claudehud/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Fyko/claudehud)
+
 A Rust rewrite of the Claude Code statusline bash script. Renders in ~2.6ms instead of ~437ms by replacing bash interpreter startup + multiple `jq`/`git` subprocess calls with a compiled binary and an mmap-backed git status daemon.
 
 Inspired by [kamranahmedse/claude-statusline](https://github.com/kamranahmedse/claude-statusline).
