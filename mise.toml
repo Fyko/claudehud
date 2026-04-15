@@ -1,0 +1,22 @@
+[tools]
+rust = "latest"
+
+[tasks.format]
+run = "cargo fmt"
+description = "Format the code"
+
+[tasks.lint]
+run = "cargo clippy"
+description = "Lint the code"
+
+[tasks.fix]
+run = "cargo clippy --fix --tests --allow-dirty"
+description = "Fix the code"
+
+[tasks.build]
+run = "cargo build"
+description = "Build the code"
+
+[tasks.test]
+run = "cargo test"
+description = "Test the code"

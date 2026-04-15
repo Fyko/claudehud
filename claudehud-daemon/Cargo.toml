@@ -1,0 +1,10 @@
+[package]
+name = "claudehud-daemon"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { workspace = true }
+memmap2 = { workspace = true }
+notify = "6"
+crossbeam-channel = "0.5"
