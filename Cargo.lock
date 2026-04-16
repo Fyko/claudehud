@@ -16,7 +16,7 @@ checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "claudehud"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "common",
  "memmap2",
@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "claudehud-daemon"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "common",
  "crossbeam-channel",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 
 [[package]]
 name = "crossbeam-channel"

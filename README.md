@@ -8,12 +8,7 @@ Inspired by [kamranahmedse/claude-statusline](https://github.com/kamranahmedse/c
 
 ## Output
 
-```ansi
-[38;2;0;153;255mOpus 4.6[0m [2m│[0m ✍️ [38;2;0;175;80m23%[0m [2m│[0m [38;2;86;182;194mclaudehud[0m [38;2;0;175;80m(main[38;2;255;85;85m*[38;2;0;175;80m)[0m
-
-[38;2;220;220;220mcurrent[0m [38;2;0;175;80m●●[2m○○○○○○○○[0m [38;2;0;175;80m22%[0m [2m ⟳ [0m[38;2;220;220;220m3:00pm[0m
-[38;2;220;220;220mweekly [0m [38;2;0;175;80m●[2m○○○○○○○○○[0m [38;2;0;175;80m11%[0m [2m ⟳ [0m[38;2;220;220;220mapr 17, 12:00pm[0m
-```
+![example.png](docs/example.png)
 
 Line 1 always renders. Lines 2–3 appear only when rate limit data is present.
 
