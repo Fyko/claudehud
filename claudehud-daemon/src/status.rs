@@ -24,8 +24,15 @@ pub fn start() {
             Ok(FetchOutcome::NotModified) => {}
             Ok(FetchOutcome::Body { body, etag: new_etag }) => {
                 etag = new_etag;
-                let incident = parse_atom(&body);
-                write_incident_to_path(Path::new(INCIDENTS_MMAP_PATH), incident.as_ref());
+                match parse_atom_result(&body) {
+                    Ok(incident) => {
+                        write_incident_to_path(
+                            Path::new(INCIDENTS_MMAP_PATH),
+                            incident.as_ref(),
+                        );
+                    }
+                    Err(e) => eprintln!("WARN status parse: {e}"),
+                }
             }
             Err(e) => {
                 eprintln!("WARN status fetch: {e}");
@@ -97,13 +104,20 @@ fn severity_from_term(term: &str) -> Severity {
         "minor" => Severity::Minor,
         "major" => Severity::Major,
         "critical" => Severity::Critical,
-        "maintenance" | "none" => Severity::Maintenance,
+        "maintenance" => Severity::Maintenance,
         _ => Severity::Minor,
     }
 }
 
+#[cfg(test)]
 pub fn parse_atom(xml: &str) -> Option<Incident> {
-    let doc = roxmltree::Document::parse(xml).ok()?;
+    parse_atom_result(xml).ok().flatten()
+}
+
+/// Distinguishes XML parse failure (retain prior mmap state) from "no active
+/// incidents" (`Ok(None)`, clear mmap).
+fn parse_atom_result(xml: &str) -> Result<Option<Incident>, roxmltree::Error> {
+    let doc = roxmltree::Document::parse(xml)?;
     let root = doc.root_element();
 
     let mut best: Option<(u64, Incident)> = None;
@@ -183,9 +197,11 @@ pub fn parse_atom(xml: &str) -> Option<Incident> {
         }
     }
 
-    let (_, mut incident) = best?;
+    let Some((_, mut incident)) = best else {
+        return Ok(None);
+    };
     incident.active_count = active_count.min(u8::MAX as u32) as u8;
-    Some(incident)
+    Ok(Some(incident))
 }
 
 fn parse_iso8601_secs(s: &str) -> Option<u64> {
@@ -369,6 +385,17 @@ mod tests {
         let got = parse_atom(ACTIVE_WITH_BAD_PUBLISHED).expect("one valid entry remains");
         assert_eq!(got.title, "Valid entry");
         assert_eq!(got.active_count, 1);
+    }
+
+    #[test]
+    fn test_parse_result_distinguishes_xml_error_from_empty() {
+        assert!(super::parse_atom_result("not xml at all<<<").is_err());
+        assert_eq!(super::parse_atom_result(EMPTY_FEED).unwrap(), None);
+    }
+
+    #[test]
+    fn test_severity_term_none_maps_to_minor() {
+        assert!(matches!(super::severity_from_term("none"), Severity::Minor));
     }
 
     #[test]
