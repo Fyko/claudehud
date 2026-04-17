@@ -1,5 +1,6 @@
 mod fmt;
 mod git;
+mod incidents;
 mod input;
 mod render;
 mod time;
