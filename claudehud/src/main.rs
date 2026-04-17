@@ -24,5 +24,5 @@ fn main() {
         .filter(|s| !s.is_empty())
         .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
 
-    print!("{}", render::render(&input, git));
+    print!("{}", render::render(&input, git, None));
 }

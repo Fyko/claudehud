@@ -2,11 +2,13 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use common::incidents::Incident;
+
 use crate::fmt::{self, *};
 use crate::input::Input;
 use crate::time::{format_duration, format_reset_time, parse_iso8601, ResetStyle};
 
-pub fn render(input: &Input, git: Option<(String, bool)>) -> String {
+pub fn render(input: &Input, git: Option<(String, bool)>, incident: Option<&Incident>) -> String {
     let mut out = String::with_capacity(512);
 
     // ── Model ──────────────────────────────────────────────
@@ -62,6 +64,12 @@ pub fn render(input: &Input, git: Option<(String, bool)>) -> String {
         out.push_str(RESET);
     }
 
+    // ── Incident line (between line 1 and rate limits) ─────
+    if let Some(inc) = incident {
+        out.push('\n');
+        push_incident_line(inc, &mut out);
+    }
+
     // ── Rate limits ────────────────────────────────────────
     if let Some(rl) = &input.rate_limits {
         if let Some(fh) = &rl.five_hour {
@@ -82,6 +90,37 @@ pub fn render(input: &Input, git: Option<(String, bool)>) -> String {
     }
 
     out
+}
+
+fn push_incident_line(inc: &Incident, out: &mut String) {
+    let url = &inc.url;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let elapsed = now.saturating_sub(inc.started_at);
+    let since = format_duration(elapsed);
+
+    write!(out, "\x1b]8;;{url}\x1b\\").unwrap();
+    out.push_str(fmt::color_for_severity(inc.severity));
+    out.push_str(fmt::severity_icon(inc.severity));
+    out.push(' ');
+    out.push_str(WHITE);
+    out.push_str(&inc.title);
+    out.push(' ');
+    out.push_str(DIM);
+    write!(out, "· started {since} ago").unwrap();
+    out.push_str(RESET);
+    out.push_str("\x1b]8;;\x1b\\");
+
+    if inc.active_count > 1 {
+        out.push(' ');
+        write!(out, "\x1b]8;;https://status.claude.com/\x1b\\").unwrap();
+        out.push_str(DIM);
+        write!(out, "+{} more", inc.active_count - 1).unwrap();
+        out.push_str(RESET);
+        out.push_str("\x1b]8;;\x1b\\");
+    }
 }
 
 fn push_rate_row(label: &str, pct: u8, resets_at: Option<u64>, style: ResetStyle, out: &mut String) {
@@ -136,19 +175,39 @@ mod tests {
 
     fn strip_ansi(s: &str) -> String {
         let mut out = String::new();
-        let mut in_escape = false;
-        for c in s.chars() {
-            if c == '\x1b' {
-                in_escape = true;
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '\x1b' {
+                out.push(c);
                 continue;
             }
-            if in_escape {
-                if c == 'm' {
-                    in_escape = false;
+            // Next char decides the sequence type.
+            match chars.next() {
+                Some('[') => {
+                    // CSI — consume until final byte in 0x40..=0x7E.
+                    for c2 in chars.by_ref() {
+                        if ('\x40'..='\x7e').contains(&c2) {
+                            break;
+                        }
+                    }
                 }
-                continue;
+                Some(']') => {
+                    // OSC — consume until BEL (0x07) or ST (ESC \).
+                    while let Some(c2) = chars.next() {
+                        if c2 == '\x07' {
+                            break;
+                        }
+                        if c2 == '\x1b' {
+                            // Peek for trailing '\\'
+                            if let Some('\\') = chars.peek() {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                _ => {}
             }
-            out.push(c);
         }
         out
     }
@@ -156,7 +215,7 @@ mod tests {
     #[test]
     fn test_render_default_model() {
         let input = Input::default();
-        let result = render(&input, None);
+        let result = render(&input, None, None);
         let plain = strip_ansi(&result);
         assert!(
             plain.contains("Claude"),
@@ -168,7 +227,7 @@ mod tests {
     fn test_render_model_name() {
         let json = r#"{"model": {"display_name": "claude-sonnet-4-5"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None));
+        let plain = strip_ansi(&render(&input, None, None));
         assert!(plain.contains("claude-sonnet-4-5"));
     }
 
@@ -181,21 +240,21 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None));
+        let plain = strip_ansi(&render(&input, None, None));
         assert!(plain.contains("50%"));
     }
 
     #[test]
     fn test_render_git_branch() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), false))));
+        let plain = strip_ansi(&render(&input, Some(("main".to_string(), false)), None));
         assert!(plain.contains("(main)"));
     }
 
     #[test]
     fn test_render_git_dirty() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), true))));
+        let plain = strip_ansi(&render(&input, Some(("main".to_string(), true)), None));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
 
@@ -203,7 +262,7 @@ mod tests {
     fn test_render_dirname() {
         let json = r#"{"cwd": "/home/user/myproject"}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None));
+        let plain = strip_ansi(&render(&input, None, None));
         assert!(plain.contains("myproject"));
     }
 
@@ -216,7 +275,7 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None);
+        let result = render(&input, None, None);
         assert!(
             result.contains('\n'),
             "should have newlines for rate limits"
@@ -224,5 +283,56 @@ mod tests {
         let plain = strip_ansi(&result);
         assert!(plain.contains("current"));
         assert!(plain.contains("weekly"));
+    }
+
+    #[test]
+    fn test_render_incident_present_major() {
+        use common::incidents::{Incident, Severity};
+        let incident = Incident {
+            severity: Severity::Major,
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                .saturating_sub(12 * 60),
+            title: "Elevated API errors".to_string(),
+            url: "https://status.claude.com/incidents/abc".to_string(),
+            active_count: 1,
+        };
+        let input = Input::default();
+        let out = render(&input, None, Some(&incident));
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("🟠"));
+        assert!(plain.contains("Elevated API errors"));
+        assert!(plain.contains("started 12m ago"));
+        assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/abc"));
+        assert!(!plain.contains("more"));
+    }
+
+    #[test]
+    fn test_render_incident_with_plus_n_more() {
+        use common::incidents::{Incident, Severity};
+        let incident = Incident {
+            severity: Severity::Minor,
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            title: "Thing A".to_string(),
+            url: "https://status.claude.com/incidents/a".to_string(),
+            active_count: 3,
+        };
+        let out = render(&Input::default(), None, Some(&incident));
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("+2 more"));
+    }
+
+    #[test]
+    fn test_render_no_incident_unchanged_shape() {
+        let out = render(&Input::default(), None, None);
+        let plain = strip_ansi(&out);
+        for icon in ["🟡", "🟠", "🔴", "🔧"] {
+            assert!(!plain.contains(icon), "unexpected icon: {icon}");
+        }
     }
 }
