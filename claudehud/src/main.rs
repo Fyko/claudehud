@@ -14,6 +14,7 @@ USAGE:
 OPTIONS:
   --usage-rounding-mode <MODE>   How to round usage percentages.
                                  Values: floor (default), ceiling, nearest
+  -V, --version                  Print version and exit
   -h, --help                     Print this help
 ";
 
@@ -22,6 +23,11 @@ fn main() -> ExitCode {
 
     if args.contains(["-h", "--help"]) {
         print!("{HELP}");
+        return ExitCode::SUCCESS;
+    }
+
+    if args.contains(["-V", "--version"]) {
+        println!("claudehud {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
 
