@@ -21,6 +21,28 @@ pub fn color_for_pct(pct: u8) -> &'static str {
     }
 }
 
+use common::incidents::Severity;
+
+pub fn severity_icon(sev: Severity) -> &'static str {
+    match sev {
+        Severity::Minor => "🟡",
+        Severity::Major => "🟠",
+        Severity::Critical => "🔴",
+        Severity::Maintenance => "🔧",
+        Severity::None => "",
+    }
+}
+
+pub fn color_for_severity(sev: Severity) -> &'static str {
+    match sev {
+        Severity::Minor => YELLOW,
+        Severity::Major => ORANGE,
+        Severity::Critical => RED,
+        Severity::Maintenance => CYAN,
+        Severity::None => RESET,
+    }
+}
+
 /// Write a color-coded progress bar into `out`. width=10 is standard.
 pub fn build_bar(pct: u8, width: usize, out: &mut String) {
     let pct = pct.min(100);
@@ -75,5 +97,24 @@ mod tests {
         build_bar(0, 10, &mut s);
         let plain: String = s.chars().filter(|&c| c == '●' || c == '○').collect();
         assert_eq!(plain, "○○○○○○○○○○");
+    }
+
+    #[test]
+    fn test_severity_icon() {
+        use common::incidents::Severity;
+        assert_eq!(severity_icon(Severity::Minor), "🟡");
+        assert_eq!(severity_icon(Severity::Major), "🟠");
+        assert_eq!(severity_icon(Severity::Critical), "🔴");
+        assert_eq!(severity_icon(Severity::Maintenance), "🔧");
+        assert_eq!(severity_icon(Severity::None), "");
+    }
+
+    #[test]
+    fn test_color_for_severity() {
+        use common::incidents::Severity;
+        assert_eq!(color_for_severity(Severity::Minor), YELLOW);
+        assert_eq!(color_for_severity(Severity::Major), ORANGE);
+        assert_eq!(color_for_severity(Severity::Critical), RED);
+        assert_eq!(color_for_severity(Severity::Maintenance), CYAN);
     }
 }
