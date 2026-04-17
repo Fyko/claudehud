@@ -2,11 +2,16 @@
 # claudehud installer
 # usage: curl -fsSL https://raw.githubusercontent.com/fyko/claudehud/main/install.sh | sh
 #
+# Re-running this script upgrades an existing install to the latest release.
+# No-op if the installed version already matches the target tag.
+#
 # Options:
-#   CLAUDEHUD_SKIP_CONFIG=1  Skip configuration of Claude Code statusline
-#   CLAUDEHUD_FORCE_CONFIG=1 Override existing statusLine configuration
-#                            (otherwise prompts interactively)
-#   CLAUDEHUD_INSTALL_DIR    Custom installation directory (default: ~/.local/bin)
+#   CLAUDEHUD_SKIP_CONFIG=1   Skip configuration of Claude Code statusline
+#   CLAUDEHUD_FORCE_CONFIG=1  Override existing statusLine configuration
+#                             (otherwise prompts interactively)
+#   CLAUDEHUD_FORCE_INSTALL=1 Reinstall even if the target version is already present
+#   CLAUDEHUD_VERSION=vX.Y.Z  Pin a specific release tag (default: latest)
+#   CLAUDEHUD_INSTALL_DIR     Custom installation directory (default: ~/.local/bin)
 set -eu
 
 REPO="fyko/claudehud"
@@ -208,8 +213,12 @@ WantedBy=default.target
 EOF
     if command -v systemctl >/dev/null 2>&1; then
         systemctl --user daemon-reload
-        systemctl --user enable --now claudehud-daemon
-        say "daemon enabled via systemd (claudehud-daemon.service)"
+        systemctl --user enable claudehud-daemon
+        # `restart` starts the unit if inactive, or restarts it (picking up a
+        # freshly-installed binary) if already running. covers both fresh
+        # install and in-place upgrade.
+        systemctl --user restart claudehud-daemon
+        say "daemon enabled + restarted via systemd (claudehud-daemon.service)"
     else
         say "wrote $svc — run: systemctl --user enable --now claudehud-daemon"
     fi
@@ -225,10 +234,38 @@ main() {
     target="$(detect_target)"
     say "detected target: $target"
 
-    say "fetching latest release tag..."
-    tag="$(latest_tag)"
-    say "installing claudehud $tag"
-    
+    if [ -n "${CLAUDEHUD_VERSION:-}" ]; then
+        tag="$CLAUDEHUD_VERSION"
+        say "using pinned version $tag (CLAUDEHUD_VERSION)"
+    else
+        say "fetching latest release tag..."
+        tag="$(latest_tag)"
+    fi
+
+    # strip leading 'v' so "v0.1.0" compares equal to "0.1.0" from --version
+    tag_ver="${tag#v}"
+
+    # up-to-date short-circuit: if the installed binary already matches the
+    # target tag, skip the download. still re-run configure_claude +
+    # start_daemon so users who ran with CLAUDEHUD_SKIP_CONFIG the first time
+    # can pick up statusline config on a later run. set CLAUDEHUD_FORCE_INSTALL
+    # to bypass.
+    if [ -z "${CLAUDEHUD_FORCE_INSTALL:-}" ] && [ -x "$INSTALL_DIR/claudehud" ]; then
+        installed_ver="$("$INSTALL_DIR/claudehud" --version 2>/dev/null | awk '{print $2}')"
+        if [ -n "$installed_ver" ] && [ "$installed_ver" = "$tag_ver" ]; then
+            say "claudehud $installed_ver is already up to date"
+            say "(set CLAUDEHUD_FORCE_INSTALL=1 to reinstall)"
+            return 0
+        fi
+        if [ -n "$installed_ver" ]; then
+            say "upgrading claudehud $installed_ver → $tag_ver"
+        else
+            say "installing claudehud $tag"
+        fi
+    else
+        say "installing claudehud $tag"
+    fi
+
     [ -n "${CLAUDEHUD_SKIP_CONFIG:-}" ] && say "CLAUDEHUD_SKIP_CONFIG set — will not configure Claude Code statusline"
     [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ] && say "CLAUDEHUD_FORCE_CONFIG set — will override existing statusLine config if present"
 
