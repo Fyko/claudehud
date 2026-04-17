@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{fence, Ordering};
 
+pub mod incidents;
+
 pub const MMAP_SIZE: usize = 138;
 pub const BRANCH_MAX: usize = 128;
 pub const WATCH_DIR: &str = "/tmp/clhud-watch";
