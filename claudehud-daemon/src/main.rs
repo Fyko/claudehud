@@ -14,6 +14,10 @@ fn main() {
         registrar::start(tx2);
     });
 
+    std::thread::spawn(|| {
+        status::start();
+    });
+
     // watcher::start runs the main event loop — blocks until channel closes
     watcher::start(rx);
 }

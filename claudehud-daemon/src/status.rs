@@ -1,4 +1,85 @@
 use common::incidents::{Incident, Severity};
+use common::incidents::{seqlock_write_incident, INCIDENTS_MMAP_PATH, INCIDENTS_MMAP_SIZE};
+use memmap2::MmapMut;
+use std::fs::OpenOptions;
+use std::path::Path;
+use std::time::Duration;
+
+const FEED_URL: &str = "https://status.claude.com/history.atom";
+const POLL_INTERVAL: Duration = Duration::from_secs(300);
+const USER_AGENT: &str = concat!("claudehud-daemon/", env!("CARGO_PKG_VERSION"));
+
+/// Main entry point for the status-polling thread. Loops forever.
+pub fn start() {
+    let agent = ureq::AgentBuilder::new()
+        .user_agent(USER_AGENT)
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(10))
+        .build();
+
+    let mut etag: Option<String> = None;
+
+    loop {
+        match fetch_once(&agent, etag.as_deref()) {
+            Ok(FetchOutcome::NotModified) => {}
+            Ok(FetchOutcome::Body { body, etag: new_etag }) => {
+                etag = new_etag;
+                let incident = parse_atom(&body);
+                write_incident_to_path(Path::new(INCIDENTS_MMAP_PATH), incident.as_ref());
+            }
+            Err(e) => {
+                eprintln!("WARN status fetch: {e}");
+            }
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+enum FetchOutcome {
+    NotModified,
+    Body { body: String, etag: Option<String> },
+}
+
+fn fetch_once(agent: &ureq::Agent, etag: Option<&str>) -> Result<FetchOutcome, String> {
+    let mut req = agent.get(FEED_URL);
+    if let Some(tag) = etag {
+        req = req.set("If-None-Match", tag);
+    }
+    match req.call() {
+        Ok(resp) => {
+            let new_etag = resp.header("ETag").map(|s| s.to_string());
+            let body = resp.into_string().map_err(|e| e.to_string())?;
+            Ok(FetchOutcome::Body { body, etag: new_etag })
+        }
+        Err(ureq::Error::Status(304, _)) => Ok(FetchOutcome::NotModified),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub(crate) fn write_incident_to_path(path: &Path, incident: Option<&Incident>) {
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("WARN incidents mmap open: {e}");
+            return;
+        }
+    };
+    if file.set_len(INCIDENTS_MMAP_SIZE as u64).is_err() {
+        return;
+    }
+    // Safety: freshly opened, sized, exclusive writer — readers use seqlock.
+    let mut mmap = match unsafe { MmapMut::map_mut(&file) } {
+        Ok(m) if m.len() >= INCIDENTS_MMAP_SIZE => m,
+        _ => return,
+    };
+    seqlock_write_incident(&mut mmap[..], incident);
+}
 
 const ACTIVE_PHASES: &[&str] = &[
     "investigating",
@@ -288,5 +369,30 @@ mod tests {
         let got = parse_atom(ACTIVE_WITH_BAD_PUBLISHED).expect("one valid entry remains");
         assert_eq!(got.title, "Valid entry");
         assert_eq!(got.active_count, 1);
+    }
+
+    #[test]
+    fn test_write_incident_to_tmp_file() {
+        use common::incidents::{seqlock_read_incident, Incident, Severity, INCIDENTS_MMAP_SIZE};
+        use std::fs::File;
+
+        let path = std::env::temp_dir().join(format!("clhud-test-{}.bin", std::process::id()));
+        let incident = Incident {
+            severity: Severity::Critical,
+            started_at: 1_700_000_000,
+            title: "Test outage".to_string(),
+            url: "https://example.com".to_string(),
+            active_count: 1,
+        };
+
+        super::write_incident_to_path(&path, Some(&incident));
+
+        let file = File::open(&path).unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(&file) }.unwrap();
+        assert_eq!(mmap.len(), INCIDENTS_MMAP_SIZE);
+        let got = seqlock_read_incident(&mmap).unwrap();
+        assert_eq!(got, incident);
+
+        let _ = std::fs::remove_file(&path);
     }
 }
