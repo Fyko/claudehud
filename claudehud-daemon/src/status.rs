@@ -49,6 +49,17 @@ pub fn parse_atom(xml: &str) -> Option<Incident> {
             continue;
         }
 
+        // started_at from <published>. Skip entries with missing/malformed timestamps
+        // so a broken feed doesn't produce "started 55y ago" output.
+        let Some(started_at) = entry
+            .children()
+            .find(|n| n.has_tag_name("published"))
+            .and_then(|n| n.text())
+            .and_then(parse_iso8601_secs)
+        else {
+            continue;
+        };
+
         active_count = active_count.saturating_add(1);
 
         // Severity from <category term="...">
@@ -66,14 +77,6 @@ pub fn parse_atom(xml: &str) -> Option<Incident> {
             .and_then(|n| n.attribute("href"))
             .unwrap_or("")
             .to_string();
-
-        // started_at from <published>
-        let started_at = entry
-            .children()
-            .find(|n| n.has_tag_name("published"))
-            .and_then(|n| n.text())
-            .and_then(parse_iso8601_secs)
-            .unwrap_or(0);
 
         // updated_at from <updated>, fall back to started_at
         let updated_at = entry
@@ -219,6 +222,26 @@ mod tests {
   <id>tag:status.claude.com,2005:/history</id>
 </feed>"#;
 
+    const ACTIVE_WITH_BAD_PUBLISHED: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>tag:status.claude.com,2005:Incident/99998</id>
+    <published>not-a-date</published>
+    <updated>2026-04-16T09:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://status.claude.com/incidents/bad"/>
+    <title>Investigating - Broken timestamp</title>
+    <category term="minor"/>
+  </entry>
+  <entry>
+    <id>tag:status.claude.com,2005:Incident/99999</id>
+    <published>2026-04-16T10:00:00Z</published>
+    <updated>2026-04-16T10:05:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://status.claude.com/incidents/good"/>
+    <title>Investigating - Valid entry</title>
+    <category term="minor"/>
+  </entry>
+</feed>"#;
+
     #[test]
     fn test_parse_active_incident() {
         let inc = parse_atom(ACTIVE_INCIDENT).expect("should parse active incident");
@@ -258,5 +281,12 @@ mod tests {
     #[test]
     fn test_parse_empty_feed() {
         assert_eq!(parse_atom(EMPTY_FEED), None);
+    }
+
+    #[test]
+    fn test_parse_skips_entry_with_malformed_published() {
+        let got = parse_atom(ACTIVE_WITH_BAD_PUBLISHED).expect("one valid entry remains");
+        assert_eq!(got.title, "Valid entry");
+        assert_eq!(got.active_count, 1);
     }
 }
