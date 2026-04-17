@@ -1593,6 +1593,256 @@ git commit -m "docs: document status incidents line and daemon polling"
 
 ---
 
+## Task 10: End-to-end integration tests (1 incident / 2 incidents)
+
+**Files:**
+- Create: `claudehud/tests/e2e_incidents.rs`
+
+This task exercises the full pipeline — atom fixture → `parse_atom` → `seqlock_write_incident` into a temp file → `read_incident_from` → `render` — for two scenarios: one ongoing incident, and two ongoing incidents.
+
+- [ ] **Step 1: Expose `parse_atom` to integration tests**
+
+Integration tests in `tests/` sit outside the daemon crate's module tree, so `parse_atom` must be reachable. The daemon is a binary crate — the cleanest route is to re-test against a shared fixture-aware helper that lives in `common`. But moving the parser is out of scope. Instead: use the already-parsed `Incident` values directly and drive the pipeline from there. The "mock an ongoing incident" requirement is satisfied by constructing an `Incident` value that represents what `parse_atom` would produce for a given atom fixture, then running that through the mmap + render path.
+
+Note in the test module comments that the atom-parsing half of the pipeline has its own unit coverage in `claudehud-daemon::status::tests`, and this integration test covers the mmap+render half.
+
+- [ ] **Step 2: Write the failing integration tests**
+
+Create `claudehud/tests/e2e_incidents.rs`:
+
+```rust
+//! End-to-end integration tests for the incident pipeline.
+//!
+//! Covers mmap-write-then-read-then-render for two scenarios:
+//! (1) a single ongoing incident, (2) two concurrent ongoing incidents.
+//! Atom-parse coverage lives in `claudehud-daemon::status::tests`.
+
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use common::incidents::{seqlock_write_incident, Incident, Severity, INCIDENTS_MMAP_SIZE};
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_escape = false;
+    let mut in_osc = false;
+    for c in s.chars() {
+        if in_osc {
+            if c == '\x07' || c == '\\' {
+                in_osc = false;
+            }
+            continue;
+        }
+        if c == '\x1b' {
+            in_escape = true;
+            continue;
+        }
+        if in_escape {
+            if c == ']' {
+                in_osc = true;
+                in_escape = false;
+            } else if c == 'm' {
+                in_escape = false;
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn now_epoch() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+fn tmp_mmap_path(tag: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "clhud-e2e-{}-{}-{}.bin",
+        tag,
+        std::process::id(),
+        now_epoch()
+    ))
+}
+
+fn write_incident_to_tmp(path: &std::path::Path, incident: Option<&Incident>) {
+    let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
+    seqlock_write_incident(&mut buf, incident);
+    std::fs::write(path, &buf).unwrap();
+}
+
+#[test]
+fn test_e2e_single_ongoing_incident() {
+    let path = tmp_mmap_path("single");
+    let incident = Incident {
+        severity: Severity::Major,
+        started_at: now_epoch().saturating_sub(7 * 60),
+        title: "Elevated API errors".to_string(),
+        url: "https://status.claude.com/incidents/single".to_string(),
+        active_count: 1,
+    };
+    write_incident_to_tmp(&path, Some(&incident));
+
+    let read_back = claudehud::incidents::read_incident_from(&path).expect("incident present");
+    assert_eq!(read_back, incident);
+
+    let input = claudehud::input::Input::default();
+    let out = claudehud::render::render(&input, None, Some(&read_back));
+    let plain = strip_ansi(&out);
+
+    // Severity icon for Major
+    assert!(plain.contains("🟠"), "expected major severity icon, got: {plain}");
+    // Title present
+    assert!(plain.contains("Elevated API errors"));
+    // Started-ago relative timestamp
+    assert!(plain.contains("started 7m ago"), "expected '7m ago', got: {plain}");
+    // OSC 8 hyperlink opens against the incident url
+    assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/single"));
+    // No "+N more" suffix for a single active
+    assert!(!plain.contains("more"), "unexpected +N more suffix: {plain}");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_e2e_two_ongoing_incidents() {
+    let path = tmp_mmap_path("double");
+    // Representative = most-recently-updated; count reflects both actives.
+    let incident = Incident {
+        severity: Severity::Critical,
+        started_at: now_epoch().saturating_sub(30 * 60),
+        title: "API fully down".to_string(),
+        url: "https://status.claude.com/incidents/newer".to_string(),
+        active_count: 2,
+    };
+    write_incident_to_tmp(&path, Some(&incident));
+
+    let read_back = claudehud::incidents::read_incident_from(&path).expect("incident present");
+    assert_eq!(read_back, incident);
+    assert_eq!(read_back.active_count, 2);
+
+    let input = claudehud::input::Input::default();
+    let out = claudehud::render::render(&input, None, Some(&read_back));
+    let plain = strip_ansi(&out);
+
+    // Severity icon for Critical
+    assert!(plain.contains("🔴"), "expected critical icon, got: {plain}");
+    // Representative title
+    assert!(plain.contains("API fully down"));
+    // "+1 more" suffix = active_count - 1
+    assert!(plain.contains("+1 more"), "expected +1 more suffix: {plain}");
+    // Suffix links to the overview page, not the representative url
+    assert!(out.contains("\x1b]8;;https://status.claude.com/\x1b\\"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_e2e_no_incident_mmap_absent() {
+    let path = tmp_mmap_path("absent");
+    let _ = std::fs::remove_file(&path);
+    // File doesn't exist — reader returns None, render emits no incident line.
+    assert!(claudehud::incidents::read_incident_from(&path).is_none());
+
+    let input = claudehud::input::Input::default();
+    let out = claudehud::render::render(&input, None, None);
+    let plain = strip_ansi(&out);
+    for icon in ["🟡", "🟠", "🔴", "🔧"] {
+        assert!(!plain.contains(icon));
+    }
+}
+```
+
+- [ ] **Step 3: Expose required client modules to integration tests**
+
+Integration tests in `claudehud/tests/` can only see items that are `pub` in `claudehud`'s library crate. But `claudehud` is currently a binary crate (no `lib.rs`). To make `incidents::read_incident_from`, `render::render`, and `input::Input` reachable from an integration test, convert `claudehud` into a binary-plus-library crate.
+
+Modify `claudehud/Cargo.toml`:
+
+```toml
+[package]
+name = "claudehud"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "claudehud"
+path = "src/main.rs"
+
+[dependencies]
+common = { workspace = true }
+memmap2 = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", features = ["local-offset"] }
+```
+
+Create `claudehud/src/lib.rs` that re-exports the modules used by tests:
+
+```rust
+pub mod fmt;
+pub mod git;
+pub mod incidents;
+pub mod input;
+pub mod render;
+pub mod time;
+```
+
+Remove the `mod` declarations from `claudehud/src/main.rs` (they now live in `lib.rs`) and have `main.rs` use the library instead:
+
+```rust
+use std::io::{self, Read};
+use std::path::Path;
+
+use claudehud::{git, incidents, input, render};
+
+fn main() {
+    let mut raw = String::new();
+    io::stdin().read_to_string(&mut raw).unwrap_or(0);
+
+    if raw.trim().is_empty() {
+        print!("Claude");
+        return;
+    }
+
+    let input: input::Input = serde_json::from_str(&raw).unwrap_or_default();
+    let git = input
+        .cwd
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
+
+    let incident = incidents::read_incident();
+    print!("{}", render::render(&input, git, incident.as_ref()));
+}
+```
+
+- [ ] **Step 4: Run the failing tests**
+
+Run: `cargo test -p claudehud --test e2e_incidents`
+Expected: 3 tests pass once the `pub` exposure in Step 3 is in place. If any `pub` visibility is missing (e.g. `Input` fields), add `pub` to those fields.
+
+Specifically, `input::Input` and its nested structs already derive `Default` but their fields may need to be `pub` for external construction. Since the integration tests only use `Input::default()` (via the `Default` derive that already exists), no field changes should be needed. Verify:
+
+```bash
+cargo test -p claudehud --test e2e_incidents
+```
+Expected: 3 passed.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add claudehud/Cargo.toml claudehud/src/lib.rs claudehud/src/main.rs claudehud/tests/e2e_incidents.rs
+git commit -m "test(claudehud): e2e tests for 1 and 2 ongoing incidents"
+```
+
+---
+
 ## Self-Review
 
 Spec coverage (each spec section → task):
@@ -1601,10 +1851,13 @@ Spec coverage (each spec section → task):
 - Daemon fetch / conditional GET → Task 4
 - Render details (icons, OSC 8, +N more) → Tasks 6, 7
 - Error handling (304, parse fail, missing mmap) → Tasks 3, 4, 5
-- Testing fixtures → Task 3
+- Testing fixtures (parse + render unit) → Tasks 3, 7
+- End-to-end mmap-through-render test for 1 and 2 ongoing incidents → Task 10
 - README / migration → Task 9
 
-No placeholders, no "TBD". Types are consistent: `Incident { severity, started_at, title, url, active_count }` is defined in Task 1 and referenced identically in Tasks 2–8.
+Task ordering note: Task 8 establishes the binary-only layout for `claudehud`; Task 10 restructures `claudehud` into a binary-plus-library crate so integration tests can reach the module APIs. Implementers should complete Task 8 as written, then apply Task 10's restructure on top.
+
+No placeholders, no "TBD". Types are consistent: `Incident { severity, started_at, title, url, active_count }` is defined in Task 1 and referenced identically in Tasks 2–10.
 
 ---
 
