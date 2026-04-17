@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 # claudehud installer
 # usage: curl -fsSL https://raw.githubusercontent.com/fyko/claudehud/main/install.sh | sh
+#
+# Options:
+#   CLAUDEHUD_SKIP_CONFIG=1  Skip configuration of Claude Code statusline
+#   CLAUDEHUD_FORCE_CONFIG=1 Override existing statusLine configuration
+#                            (otherwise prompts interactively)
+#   CLAUDEHUD_INSTALL_DIR    Custom installation directory (default: ~/.local/bin)
 set -eu
 
 REPO="fyko/claudehud"
@@ -85,6 +91,12 @@ download() {
 # ---------------------------------------------------------------------------
 
 configure_claude() {
+    # skip if user requested no configuration
+    [ -n "${CLAUDEHUD_SKIP_CONFIG:-}" ] && {
+        say "skipping Claude Code configuration (CLAUDEHUD_SKIP_CONFIG is set)"
+        return 0
+    }
+
     settings="$HOME/.claude/settings.json"
 
     # only touch the file if claude settings dir exists or user ran claude already
@@ -97,9 +109,41 @@ configure_claude() {
         return
     fi
 
-    # already has statusLine key — don't stomp it
+    # Check if statusLine already exists
     if grep -q '"statusLine"' "$settings" 2>/dev/null; then
-        say "~/.claude/settings.json already has statusLine — skipping (edit manually if needed)"
+        if [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ]; then
+            # Force override via environment variable
+            if command -v jq >/dev/null 2>&1; then
+                tmp="$(mktemp)"
+                jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
+                    "$settings" > "$tmp" && mv "$tmp" "$settings"
+                say "updated statusLine in $settings (using jq)"
+            else
+                say "~/.claude/settings.json already has statusLine and CLAUDEHUD_FORCE_CONFIG is set"
+                say "jq not found — install jq or manually update statusLine.command to: $INSTALL_DIR/claudehud"
+                say "Example with jq: jq '.statusLine = {command: \"$INSTALL_DIR/claudehud\"}' $settings > $settings.new && mv $settings.new $settings"
+            fi
+        else
+            # Interactive prompt
+            printf '\033[33m%s\033[0m already has a statusLine configuration.\n' "$settings"
+            printf 'Do you want to override it with claudehud? [y/N] '
+            read -r response || true  # Don't exit on read error (e.g., EOF)
+            case "$response" in
+                [yY][eE][sS]|[yY])
+                    if command -v jq >/dev/null 2>&1; then
+                        tmp="$(mktemp)"
+                        jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
+                            "$settings" > "$tmp" && mv "$tmp" "$settings"
+                        say "updated statusLine in $settings"
+                    else
+                        say "jq not found — please manually update statusLine.command to: $INSTALL_DIR/claudehud"
+                    fi
+                    ;;
+                *)
+                    say "skipping statusLine configuration"
+                    ;;
+            esac
+        fi
         return
     fi
 
@@ -184,6 +228,9 @@ main() {
     say "fetching latest release tag..."
     tag="$(latest_tag)"
     say "installing claudehud $tag"
+    
+    [ -n "${CLAUDEHUD_SKIP_CONFIG:-}" ] && say "CLAUDEHUD_SKIP_CONFIG set — will not configure Claude Code statusline"
+    [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ] && say "CLAUDEHUD_FORCE_CONFIG set — will override existing statusLine config if present"
 
     # ensure install dir exists and is in PATH
     mkdir -p "$INSTALL_DIR"
