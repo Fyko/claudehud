@@ -1,6 +1,7 @@
 // claudehud-daemon/src/main.rs
 mod cache;
 mod registrar;
+mod status;
 mod watcher;
 
 use std::path::PathBuf;
@@ -11,6 +12,10 @@ fn main() {
 
     std::thread::spawn(move || {
         registrar::start(tx2);
+    });
+
+    std::thread::spawn(|| {
+        status::start();
     });
 
     // watcher::start runs the main event loop — blocks until channel closes

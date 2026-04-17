@@ -1,11 +1,7 @@
-mod fmt;
-mod git;
-mod input;
-mod render;
-mod time;
-
 use std::io::{self, Read};
 use std::path::Path;
+
+use claudehud::{git, incidents, input, render};
 
 fn main() {
     let mut raw = String::new();
@@ -23,5 +19,6 @@ fn main() {
         .filter(|s| !s.is_empty())
         .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
 
-    print!("{}", render::render(&input, git));
+    let incident = incidents::read_incident();
+    print!("{}", render::render(&input, git, incident.as_ref()));
 }

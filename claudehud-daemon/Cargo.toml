@@ -8,3 +8,5 @@ common = { workspace = true }
 memmap2 = { workspace = true }
 notify = "6"
 crossbeam-channel = "0.5"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+roxmltree = "0.20"

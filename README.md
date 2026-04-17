@@ -12,15 +12,27 @@ Inspired by [kamranahmedse/claude-statusline](https://github.com/kamranahmedse/c
 
 Line 1 always renders. Lines 2–3 appear only when rate limit data is present.
 
+## Status incidents
+
+When `status.claude.com` reports an active incident (or in-progress scheduled maintenance), `claudehud` emits a hyperlinked line directly below line 1:
+
+```
+🟡 Elevated API errors · started 12m ago    +1 more
+```
+
+The daemon polls `https://status.claude.com/history.atom` every 5 minutes using a conditional GET, so most hits return 304 Not Modified. When an incident is active, the most-recently-updated entry is shown; the `+N more` suffix appears when more than one incident or in-progress maintenance is active and links to the main status page. The line disappears automatically once every incident transitions to Resolved or Completed.
+
+The daemon stores the current representative incident at `/tmp/clhud-incidents.bin` (408 bytes, seqlock-protected). If the daemon isn't running, the line simply doesn't appear — this degrades silently, like the git cache.
+
 ## Architecture
 
 Two binaries in a Cargo workspace:
 
 ```
 claudehud/
-├── common/                 shared constants, FNV hash, seqlock read, git root detection
+├── common/                 shared constants, FNV hash, seqlock read, git root detection, incidents layout
 ├── claudehud/              client binary — reads JSON from stdin, writes statusline to stdout
-└── claudehud-daemon/       daemon — watches git repos reactively, caches status in mmap files
+└── claudehud-daemon/       daemon — watches git repos reactively, polls status.claude.com, caches in mmap files
 ```
 
 ### IPC: mmap + seqlock
@@ -159,5 +171,7 @@ systemctl --user enable --now claudehud-daemon
 | `time` | client | local timezone formatting |
 | `notify` | daemon | FSEvents/inotify filesystem watching |
 | `crossbeam-channel` | daemon | multi-producer channel between registrar and watcher threads |
+| `ureq` | daemon | HTTPS client for status.claude.com |
+| `roxmltree` | daemon | Atom feed parser |
 
 `common` has no external dependencies.
