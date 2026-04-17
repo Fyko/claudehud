@@ -3,6 +3,13 @@ name = "claudehud"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "claudehud"
+path = "src/main.rs"
+
 [dependencies]
 common = { workspace = true }
 memmap2 = { workspace = true }

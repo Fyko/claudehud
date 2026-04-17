@@ -1,12 +1,7 @@
-mod fmt;
-mod git;
-mod incidents;
-mod input;
-mod render;
-mod time;
-
 use std::io::{self, Read};
 use std::path::Path;
+
+use claudehud::{git, incidents, input, render};
 
 fn main() {
     let mut raw = String::new();
