@@ -94,6 +94,52 @@ fn read_u64_le(buf: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(buf[offset..offset + 8].try_into().unwrap())
 }
 
+/// Seqlock write for incident data.
+/// Panics if buf.len() < INCIDENTS_MMAP_SIZE.
+pub fn seqlock_write_incident(buf: &mut [u8], incident: Option<&Incident>) {
+    assert!(buf.len() >= INCIDENTS_MMAP_SIZE);
+
+    // Read current seq and increment to odd (write in progress)
+    let seq = u64::from_le_bytes(buf[0..8].try_into().unwrap());
+    buf[0..8].copy_from_slice(&seq.wrapping_add(1).to_le_bytes());
+    fence(Ordering::SeqCst);
+
+    if let Some(inc) = incident {
+        // Write active_count, severity, started_at
+        buf[8] = inc.active_count;
+        buf[9] = inc.severity as u8;
+        buf[10..18].copy_from_slice(&inc.started_at.to_le_bytes());
+
+        // Write title: truncate to TITLE_MAX, write len byte + data, zero-pad remainder
+        let title_bytes = inc.title.as_bytes();
+        let title_len = title_bytes.len().min(TITLE_MAX);
+        buf[18] = title_len as u8;
+        buf[19..19 + title_len].copy_from_slice(&title_bytes[..title_len]);
+        buf[19 + title_len..19 + TITLE_MAX].fill(0);
+
+        // Write url: truncate to URL_MAX, write len byte + data, zero-pad remainder
+        let url_bytes = inc.url.as_bytes();
+        let url_len = url_bytes.len().min(URL_MAX);
+        buf[147] = url_len as u8;
+        buf[148..148 + url_len].copy_from_slice(&url_bytes[..url_len]);
+        buf[148 + url_len..148 + URL_MAX].fill(0);
+    } else {
+        // Clear incident: zero out active_count, severity, started_at, title region, url region
+        buf[8] = 0;
+        buf[9] = 0;
+        buf[10..18].fill(0);
+        buf[18] = 0;
+        buf[19..19 + TITLE_MAX].fill(0);
+        buf[147] = 0;
+        buf[148..148 + URL_MAX].fill(0);
+    }
+
+    fence(Ordering::SeqCst);
+    // Increment seq to even (write complete)
+    let seq2 = u64::from_le_bytes(buf[0..8].try_into().unwrap());
+    buf[0..8].copy_from_slice(&seq2.wrapping_add(1).to_le_bytes());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +170,69 @@ mod tests {
         assert_eq!(got.started_at, 1_700_000_000);
         assert_eq!(got.title, "Elevated errors");
         assert_eq!(got.url, "https://status.claude.com/incidents/abc");
+    }
+
+    #[test]
+    fn test_write_then_read_round_trip() {
+        let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
+        let incident = Incident {
+            severity: Severity::Critical,
+            started_at: 1_700_000_000,
+            title: "API outage".to_string(),
+            url: "https://status.claude.com/incidents/xyz".to_string(),
+            active_count: 2,
+        };
+        seqlock_write_incident(&mut buf, Some(&incident));
+        let got = seqlock_read_incident(&buf).expect("populated");
+        assert_eq!(got, incident);
+    }
+
+    #[test]
+    fn test_write_none_clears() {
+        let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
+        let incident = Incident {
+            severity: Severity::Minor,
+            started_at: 42,
+            title: "x".to_string(),
+            url: "y".to_string(),
+            active_count: 1,
+        };
+        seqlock_write_incident(&mut buf, Some(&incident));
+        assert!(seqlock_read_incident(&buf).is_some());
+        seqlock_write_incident(&mut buf, None);
+        assert_eq!(seqlock_read_incident(&buf), None);
+    }
+
+    #[test]
+    fn test_write_truncates_long_title() {
+        let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
+        let long_title = "a".repeat(TITLE_MAX + 50);
+        let incident = Incident {
+            severity: Severity::Minor,
+            started_at: 0,
+            title: long_title.clone(),
+            url: "u".to_string(),
+            active_count: 1,
+        };
+        seqlock_write_incident(&mut buf, Some(&incident));
+        let got = seqlock_read_incident(&buf).unwrap();
+        assert_eq!(got.title.len(), TITLE_MAX);
+        assert!(long_title.starts_with(&got.title));
+    }
+
+    #[test]
+    fn test_write_truncates_long_url() {
+        let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
+        let long_url = "u".repeat(URL_MAX + 50);
+        let incident = Incident {
+            severity: Severity::Minor,
+            started_at: 0,
+            title: "t".to_string(),
+            url: long_url.clone(),
+            active_count: 1,
+        };
+        seqlock_write_incident(&mut buf, Some(&incident));
+        let got = seqlock_read_incident(&buf).unwrap();
+        assert_eq!(got.url.len(), URL_MAX);
     }
 }
