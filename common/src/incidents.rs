@@ -100,7 +100,7 @@ pub fn seqlock_write_incident(buf: &mut [u8], incident: Option<&Incident>) {
     assert!(buf.len() >= INCIDENTS_MMAP_SIZE);
 
     // Read current seq and increment to odd (write in progress)
-    let seq = u64::from_le_bytes(buf[0..8].try_into().unwrap());
+    let seq = read_u64_le(buf, 0);
     buf[0..8].copy_from_slice(&seq.wrapping_add(1).to_le_bytes());
     fence(Ordering::SeqCst);
 
@@ -136,7 +136,7 @@ pub fn seqlock_write_incident(buf: &mut [u8], incident: Option<&Incident>) {
 
     fence(Ordering::SeqCst);
     // Increment seq to even (write complete)
-    let seq2 = u64::from_le_bytes(buf[0..8].try_into().unwrap());
+    let seq2 = read_u64_le(buf, 0);
     buf[0..8].copy_from_slice(&seq2.wrapping_add(1).to_le_bytes());
 }
 
@@ -206,7 +206,9 @@ mod tests {
     #[test]
     fn test_write_truncates_long_title() {
         let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
-        let long_title = "a".repeat(TITLE_MAX + 50);
+        let long_title: String = (0..TITLE_MAX + 50)
+            .map(|i| ((i % 26) as u8 + b'a') as char)
+            .collect();
         let incident = Incident {
             severity: Severity::Minor,
             started_at: 0,
@@ -217,13 +219,15 @@ mod tests {
         seqlock_write_incident(&mut buf, Some(&incident));
         let got = seqlock_read_incident(&buf).unwrap();
         assert_eq!(got.title.len(), TITLE_MAX);
-        assert!(long_title.starts_with(&got.title));
+        assert_eq!(got.title, long_title[..TITLE_MAX]);
     }
 
     #[test]
     fn test_write_truncates_long_url() {
         let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
-        let long_url = "u".repeat(URL_MAX + 50);
+        let long_url: String = (0..URL_MAX + 50)
+            .map(|i| ((i % 26) as u8 + b'a') as char)
+            .collect();
         let incident = Incident {
             severity: Severity::Minor,
             started_at: 0,
@@ -234,5 +238,30 @@ mod tests {
         seqlock_write_incident(&mut buf, Some(&incident));
         let got = seqlock_read_incident(&buf).unwrap();
         assert_eq!(got.url.len(), URL_MAX);
+        assert_eq!(got.url, long_url[..URL_MAX]);
+    }
+
+    #[test]
+    fn test_write_short_after_long_clears_tail() {
+        let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
+        let long = Incident {
+            severity: Severity::Minor,
+            started_at: 0,
+            title: "x".repeat(TITLE_MAX).to_string(),
+            url: "y".repeat(URL_MAX).to_string(),
+            active_count: 1,
+        };
+        seqlock_write_incident(&mut buf, Some(&long));
+        let short = Incident {
+            severity: Severity::Minor,
+            started_at: 0,
+            title: "short".to_string(),
+            url: "https://ex.com".to_string(),
+            active_count: 1,
+        };
+        seqlock_write_incident(&mut buf, Some(&short));
+        let got = seqlock_read_incident(&buf).unwrap();
+        assert_eq!(got.title, "short");
+        assert_eq!(got.url, "https://ex.com");
     }
 }
