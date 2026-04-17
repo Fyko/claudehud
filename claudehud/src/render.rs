@@ -8,7 +8,40 @@ use crate::fmt::{self, *};
 use crate::input::Input;
 use crate::time::{format_duration, format_reset_time, parse_iso8601, ResetStyle};
 
-pub fn render(input: &Input, git: Option<(String, bool)>, incident: Option<&Incident>) -> String {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RoundingMode {
+    #[default]
+    Floor,
+    Ceiling,
+    Nearest,
+}
+
+impl RoundingMode {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "floor" => Some(Self::Floor),
+            "ceil" | "ceiling" => Some(Self::Ceiling),
+            "nearest" | "round" | "regular" => Some(Self::Nearest),
+            _ => None,
+        }
+    }
+
+    fn apply(self, pct: f64) -> u8 {
+        let rounded = match self {
+            Self::Floor => pct.floor(),
+            Self::Ceiling => pct.ceil(),
+            Self::Nearest => pct.round(),
+        };
+        rounded.clamp(0.0, 100.0) as u8
+    }
+}
+
+pub fn render(
+    input: &Input,
+    git: Option<(String, bool)>,
+    incident: Option<&Incident>,
+    rounding: RoundingMode,
+) -> String {
     let mut out = String::with_capacity(512);
 
     // ── Model ──────────────────────────────────────────────
@@ -23,7 +56,7 @@ pub fn render(input: &Input, git: Option<(String, bool)>, incident: Option<&Inci
 
     // ── Context usage ──────────────────────────────────────
     out.push_str(SEP);
-    let pct = context_pct(input);
+    let pct = context_pct(input, rounding);
     out.push_str("✍️ ");
     out.push_str(color_for_pct(pct));
     write!(out, "{pct}%").unwrap();
@@ -74,13 +107,13 @@ pub fn render(input: &Input, git: Option<(String, bool)>, incident: Option<&Inci
     if let Some(rl) = &input.rate_limits {
         if let Some(fh) = &rl.five_hour {
             if let Some(pct_f) = fh.used_percentage {
-                let pct = pct_f.round().clamp(0.0, 100.0) as u8;
+                let pct = rounding.apply(pct_f);
                 out.push_str("\n\n");
                 push_rate_row("current", pct, fh.resets_at, ResetStyle::Time, &mut out);
 
                 if let Some(sd) = &rl.seven_day {
                     if let Some(pct_f) = sd.used_percentage {
-                        let pct = pct_f.round().clamp(0.0, 100.0) as u8;
+                        let pct = rounding.apply(pct_f);
                         out.push('\n');
                         push_rate_row("weekly ", pct, sd.resets_at, ResetStyle::DateTime, &mut out);
                     }
@@ -144,7 +177,7 @@ fn push_rate_row(label: &str, pct: u8, resets_at: Option<u64>, style: ResetStyle
     }
 }
 
-fn context_pct(input: &Input) -> u8 {
+fn context_pct(input: &Input, rounding: RoundingMode) -> u8 {
     let cw = input.context_window.as_ref();
     let size = cw
         .and_then(|cw| cw.context_window_size)
@@ -158,7 +191,7 @@ fn context_pct(input: &Input) -> u8 {
                 + u.cache_read_input_tokens.unwrap_or(0)
         })
         .unwrap_or(0);
-    ((current * 100) / size).min(100) as u8
+    rounding.apply((current as f64 * 100.0) / size as f64)
 }
 
 fn session_duration(input: &Input) -> Option<String> {
@@ -215,7 +248,7 @@ mod tests {
     #[test]
     fn test_render_default_model() {
         let input = Input::default();
-        let result = render(&input, None, None);
+        let result = render(&input, None, None, RoundingMode::Floor);
         let plain = strip_ansi(&result);
         assert!(
             plain.contains("Claude"),
@@ -227,7 +260,7 @@ mod tests {
     fn test_render_model_name() {
         let json = r#"{"model": {"display_name": "claude-sonnet-4-5"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, None));
+        let plain = strip_ansi(&render(&input, None, None, RoundingMode::Floor));
         assert!(plain.contains("claude-sonnet-4-5"));
     }
 
@@ -240,21 +273,21 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, None));
+        let plain = strip_ansi(&render(&input, None, None, RoundingMode::Floor));
         assert!(plain.contains("50%"));
     }
 
     #[test]
     fn test_render_git_branch() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), false)), None));
+        let plain = strip_ansi(&render(&input, Some(("main".to_string(), false)), None, RoundingMode::Floor));
         assert!(plain.contains("(main)"));
     }
 
     #[test]
     fn test_render_git_dirty() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), true)), None));
+        let plain = strip_ansi(&render(&input, Some(("main".to_string(), true)), None, RoundingMode::Floor));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
 
@@ -262,7 +295,7 @@ mod tests {
     fn test_render_dirname() {
         let json = r#"{"cwd": "/home/user/myproject"}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, None));
+        let plain = strip_ansi(&render(&input, None, None, RoundingMode::Floor));
         assert!(plain.contains("myproject"));
     }
 
@@ -275,7 +308,7 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, None);
+        let result = render(&input, None, None, RoundingMode::Floor);
         assert!(
             result.contains('\n'),
             "should have newlines for rate limits"
@@ -300,7 +333,7 @@ mod tests {
             active_count: 1,
         };
         let input = Input::default();
-        let out = render(&input, None, Some(&incident));
+        let out = render(&input, None, Some(&incident), RoundingMode::Floor);
         let plain = strip_ansi(&out);
         assert!(plain.contains("🟠"));
         assert!(plain.contains("Elevated API errors"));
@@ -322,17 +355,55 @@ mod tests {
             url: "https://status.claude.com/incidents/a".to_string(),
             active_count: 3,
         };
-        let out = render(&Input::default(), None, Some(&incident));
+        let out = render(&Input::default(), None, Some(&incident), RoundingMode::Floor);
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
     }
 
     #[test]
     fn test_render_no_incident_unchanged_shape() {
-        let out = render(&Input::default(), None, None);
+        let out = render(&Input::default(), None, None, RoundingMode::Floor);
         let plain = strip_ansi(&out);
         for icon in ["🟡", "🟠", "🔴", "🔧"] {
             assert!(!plain.contains(icon), "unexpected icon: {icon}");
         }
+    }
+
+    #[test]
+    fn test_rounding_mode_parse() {
+        assert_eq!(RoundingMode::parse("floor"), Some(RoundingMode::Floor));
+        assert_eq!(RoundingMode::parse("FLOOR"), Some(RoundingMode::Floor));
+        assert_eq!(RoundingMode::parse("ceil"), Some(RoundingMode::Ceiling));
+        assert_eq!(RoundingMode::parse("ceiling"), Some(RoundingMode::Ceiling));
+        assert_eq!(RoundingMode::parse("nearest"), Some(RoundingMode::Nearest));
+        assert_eq!(RoundingMode::parse("round"), Some(RoundingMode::Nearest));
+        assert_eq!(RoundingMode::parse("regular"), Some(RoundingMode::Nearest));
+        assert_eq!(RoundingMode::parse("huh"), None);
+    }
+
+    #[test]
+    fn test_rounding_mode_apply() {
+        assert_eq!(RoundingMode::Floor.apply(49.9), 49);
+        assert_eq!(RoundingMode::Ceiling.apply(49.1), 50);
+        assert_eq!(RoundingMode::Nearest.apply(49.5), 50);
+        assert_eq!(RoundingMode::Nearest.apply(49.4), 49);
+        // clamping
+        assert_eq!(RoundingMode::Ceiling.apply(120.0), 100);
+        assert_eq!(RoundingMode::Floor.apply(-5.0), 0);
+    }
+
+    #[test]
+    fn test_render_context_pct_rounding_modes() {
+        // 100_001 / 200_000 = 50.0005%
+        let json = r#"{
+            "context_window": {
+                "context_window_size": 200000,
+                "current_usage": {"input_tokens": 100001, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        assert!(strip_ansi(&render(&input, None, None, RoundingMode::Floor)).contains("50%"));
+        assert!(strip_ansi(&render(&input, None, None, RoundingMode::Ceiling)).contains("51%"));
+        assert!(strip_ansi(&render(&input, None, None, RoundingMode::Nearest)).contains("50%"));
     }
 }

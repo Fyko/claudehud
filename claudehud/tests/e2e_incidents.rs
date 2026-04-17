@@ -82,7 +82,7 @@ fn test_e2e_single_ongoing_incident() {
     assert_eq!(read_back, incident);
 
     let input = claudehud::input::Input::default();
-    let out = claudehud::render::render(&input, None, Some(&read_back));
+    let out = claudehud::render::render(&input, None, Some(&read_back), claudehud::render::RoundingMode::Floor);
     let plain = strip_ansi(&out);
 
     assert!(plain.contains("🟠"), "expected major severity icon, got: {plain}");
@@ -111,7 +111,7 @@ fn test_e2e_two_ongoing_incidents() {
     assert_eq!(read_back.active_count, 2);
 
     let input = claudehud::input::Input::default();
-    let out = claudehud::render::render(&input, None, Some(&read_back));
+    let out = claudehud::render::render(&input, None, Some(&read_back), claudehud::render::RoundingMode::Floor);
     let plain = strip_ansi(&out);
 
     assert!(plain.contains("🔴"), "expected critical icon, got: {plain}");
@@ -129,7 +129,7 @@ fn test_e2e_no_incident_mmap_absent() {
     assert!(claudehud::incidents::read_incident_from(&path).is_none());
 
     let input = claudehud::input::Input::default();
-    let out = claudehud::render::render(&input, None, None);
+    let out = claudehud::render::render(&input, None, None, claudehud::render::RoundingMode::Floor);
     let plain = strip_ansi(&out);
     for icon in ["🟡", "🟠", "🔴", "🔧"] {
         assert!(!plain.contains(icon));
