@@ -1,6 +1,7 @@
 // claudehud-daemon/src/main.rs
 mod cache;
 mod registrar;
+mod status;
 mod watcher;
 
 use std::path::PathBuf;
