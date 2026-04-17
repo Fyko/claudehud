@@ -22,6 +22,7 @@ INSTALL_DIR="${CLAUDEHUD_INSTALL_DIR:-$HOME/.local/bin}"
 # ---------------------------------------------------------------------------
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
+warn() { printf '\033[33mwarn:\033[0m %s\n' "$*" >&2; }
 err() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 need() {
@@ -95,8 +96,40 @@ download() {
 # configure claude code statusline
 # ---------------------------------------------------------------------------
 
+# set $1's top-level .statusLine to claudehud's command. assignment works
+# whether the key exists or not. returns 0 on success, 1 if no JSON tool is
+# available. sed would corrupt files with nested objects (every `}` at EOL
+# matches), so we require a real JSON parser.
+set_statusline() {
+    _settings="$1"
+    _tmp="$(mktemp)"
+    _rc=1
+    if command -v jq >/dev/null 2>&1; then
+        jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
+            "$_settings" > "$_tmp" && mv "$_tmp" "$_settings" && _rc=0
+    elif command -v python3 >/dev/null 2>&1; then
+        if CLAUDEHUD_CMD="$INSTALL_DIR/claudehud" python3 - "$_settings" "$_tmp" <<'PY'
+import json, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    data = json.load(f)
+data["statusLine"] = {"command": os.environ["CLAUDEHUD_CMD"]}
+with open(dst, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+        then
+            mv "$_tmp" "$_settings" && _rc=0
+        fi
+    else
+        warn "neither jq nor python3 found — cannot safely edit $_settings"
+        printf '       manually set statusLine.command to: %s/claudehud\n' "$INSTALL_DIR" >&2
+    fi
+    rm -f "$_tmp"
+    return "$_rc"
+}
+
 configure_claude() {
-    # skip if user requested no configuration
     [ -n "${CLAUDEHUD_SKIP_CONFIG:-}" ] && {
         say "skipping Claude Code configuration (CLAUDEHUD_SKIP_CONFIG is set)"
         return 0
@@ -104,7 +137,6 @@ configure_claude() {
 
     settings="$HOME/.claude/settings.json"
 
-    # only touch the file if claude settings dir exists or user ran claude already
     [ -d "$HOME/.claude" ] || return 0
 
     if [ ! -f "$settings" ]; then
@@ -114,49 +146,27 @@ configure_claude() {
         return
     fi
 
-    # Check if statusLine already exists
-    if grep -q '"statusLine"' "$settings" 2>/dev/null; then
-        if [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ]; then
-            # Force override via environment variable
-            if command -v jq >/dev/null 2>&1; then
-                tmp="$(mktemp)"
-                jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
-                    "$settings" > "$tmp" && mv "$tmp" "$settings"
-                say "updated statusLine in $settings (using jq)"
-            else
-                say "~/.claude/settings.json already has statusLine and CLAUDEHUD_FORCE_CONFIG is set"
-                say "jq not found — install jq or manually update statusLine.command to: $INSTALL_DIR/claudehud"
-                say "Example with jq: jq '.statusLine = {command: \"$INSTALL_DIR/claudehud\"}' $settings > $settings.new && mv $settings.new $settings"
-            fi
-        else
-            # Interactive prompt
-            printf '\033[33m%s\033[0m already has a statusLine configuration.\n' "$settings"
-            printf 'Do you want to override it with claudehud? [y/N] '
-            read -r response || true  # Don't exit on read error (e.g., EOF)
-            case "$response" in
-                [yY][eE][sS]|[yY])
-                    if command -v jq >/dev/null 2>&1; then
-                        tmp="$(mktemp)"
-                        jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
-                            "$settings" > "$tmp" && mv "$tmp" "$settings"
-                        say "updated statusLine in $settings"
-                    else
-                        say "jq not found — please manually update statusLine.command to: $INSTALL_DIR/claudehud"
-                    fi
-                    ;;
-                *)
-                    say "skipping statusLine configuration"
-                    ;;
-            esac
-        fi
+    if ! grep -q '"statusLine"' "$settings" 2>/dev/null; then
+        set_statusline "$settings" && say "added statusLine to $settings"
         return
     fi
 
-    # inject before the last closing brace
-    tmp="$(mktemp)"
-    sed 's/}[[:space:]]*$/,\n  "statusLine": {\n    "command": "'"$INSTALL_DIR"'\/claudehud"\n  }\n}/' \
-        "$settings" > "$tmp" && mv "$tmp" "$settings"
-    say "added statusLine to $settings"
+    if [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ]; then
+        set_statusline "$settings" && say "updated statusLine in $settings"
+        return
+    fi
+
+    printf '\033[33m%s\033[0m already has a statusLine configuration.\n' "$settings"
+    printf 'Do you want to override it with claudehud? [y/N] '
+    read -r response || true  # EOF (non-interactive pipe) shouldn't abort install
+    case "$response" in
+        [yY][eE][sS]|[yY])
+            set_statusline "$settings" && say "updated statusLine in $settings"
+            ;;
+        *)
+            say "skipping statusLine configuration"
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
