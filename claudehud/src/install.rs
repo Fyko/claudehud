@@ -75,6 +75,31 @@ fn load_settings(path: &Path) -> io::Result<Option<Value>> {
     }
 }
 
+#[allow(dead_code)]
+fn atomic_write(path: &Path, contents: &str) -> io::Result<()> {
+    let tmp = tempfile_path(path);
+    let write_result = fs::write(&tmp, contents);
+    if let Err(e) = write_result {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn tempfile_path(target: &Path) -> PathBuf {
+    let mut name = target
+        .file_name()
+        .map(|s| s.to_os_string())
+        .unwrap_or_else(|| "settings.json".into());
+    name.push(".claudehud-tmp");
+    target.with_file_name(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +204,43 @@ mod tests {
         let got = set_statusline_command(v, "/bin/claudehud");
         assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
         assert_eq!(got.as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn atomic_write_creates_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        atomic_write(&path, "hello").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello");
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "old").unwrap();
+        atomic_write(&path, "new").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn atomic_write_no_tempfile_left_behind_on_success() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        atomic_write(&path, "x").unwrap();
+
+        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(entries.len(), 1, "only the settings.json should remain");
+    }
+
+    #[test]
+    fn atomic_write_errors_when_parent_missing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("no-such-subdir").join("settings.json");
+        let err = atomic_write(&path, "x").unwrap_err();
+        assert!(matches!(
+            err.kind(),
+            io::ErrorKind::NotFound | io::ErrorKind::Other
+        ));
     }
 }
