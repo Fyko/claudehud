@@ -22,7 +22,6 @@ INSTALL_DIR="${CLAUDEHUD_INSTALL_DIR:-$HOME/.local/bin}"
 # ---------------------------------------------------------------------------
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
-warn() { printf '\033[33mwarn:\033[0m %s\n' "$*" >&2; }
 err() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 need() {
@@ -96,77 +95,20 @@ download() {
 # configure claude code statusline
 # ---------------------------------------------------------------------------
 
-# set $1's top-level .statusLine to claudehud's command. assignment works
-# whether the key exists or not. returns 0 on success, 1 if no JSON tool is
-# available. sed would corrupt files with nested objects (every `}` at EOL
-# matches), so we require a real JSON parser.
-set_statusline() {
-    _settings="$1"
-    _tmp="$(mktemp)"
-    _rc=1
-    if command -v jq >/dev/null 2>&1; then
-        jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
-            "$_settings" > "$_tmp" && mv "$_tmp" "$_settings" && _rc=0
-    elif command -v python3 >/dev/null 2>&1; then
-        if CLAUDEHUD_CMD="$INSTALL_DIR/claudehud" python3 - "$_settings" "$_tmp" <<'PY'
-import json, os, sys
-src, dst = sys.argv[1], sys.argv[2]
-with open(src) as f:
-    data = json.load(f)
-data["statusLine"] = {"command": os.environ["CLAUDEHUD_CMD"]}
-with open(dst, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PY
-        then
-            mv "$_tmp" "$_settings" && _rc=0
-        fi
-    else
-        warn "neither jq nor python3 found — cannot safely edit $_settings"
-        printf '       manually set statusLine.command to: %s/claudehud\n' "$INSTALL_DIR" >&2
-    fi
-    rm -f "$_tmp"
-    return "$_rc"
-}
-
 configure_claude() {
     [ -n "${CLAUDEHUD_SKIP_CONFIG:-}" ] && {
         say "skipping Claude Code configuration (CLAUDEHUD_SKIP_CONFIG is set)"
         return 0
     }
 
-    settings="$HOME/.claude/settings.json"
+    install_args=""
+    [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ] && install_args="--force"
 
-    [ -d "$HOME/.claude" ] || return 0
-
-    if [ ! -f "$settings" ]; then
-        printf '{\n  "statusLine": {\n    "command": "%s/claudehud"\n  }\n}\n' \
-            "$INSTALL_DIR" > "$settings"
-        say "created $settings with statusLine config"
-        return
-    fi
-
-    if ! grep -q '"statusLine"' "$settings" 2>/dev/null; then
-        set_statusline "$settings" && say "added statusLine to $settings"
-        return
-    fi
-
-    if [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ]; then
-        set_statusline "$settings" && say "updated statusLine in $settings"
-        return
-    fi
-
-    printf '\033[33m%s\033[0m already has a statusLine configuration.\n' "$settings"
-    printf 'Do you want to override it with claudehud? [y/N] '
-    read -r response || true  # EOF (non-interactive pipe) shouldn't abort install
-    case "$response" in
-        [yY][eE][sS]|[yY])
-            set_statusline "$settings" && say "updated statusLine in $settings"
-            ;;
-        *)
-            say "skipping statusLine configuration"
-            ;;
-    esac
+    # claudehud install is a no-op if ~/.claude doesn't exist yet, and exits
+    # non-zero on collision without --force. Don't let a non-force collision
+    # abort the rest of the install — the subcommand already printed a hint
+    # and the binary is on disk.
+    "$INSTALL_DIR/claudehud" install $install_args || true
 }
 
 # ---------------------------------------------------------------------------
