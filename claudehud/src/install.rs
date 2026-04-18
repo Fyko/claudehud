@@ -31,7 +31,6 @@ pub fn run(mut args: Arguments) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-#[allow(dead_code)]
 fn set_statusline_command(value: Value, command: &str) -> Value {
     let mut obj = match value {
         Value::Object(m) => m,
@@ -58,7 +57,6 @@ fn resolve_settings_path(
     home.map(|h| h.join(".claude").join("settings.json"))
 }
 
-#[allow(dead_code)]
 fn load_settings(path: &Path) -> io::Result<Option<Value>> {
     match fs::read_to_string(path) {
         Ok(s) => {
@@ -75,7 +73,6 @@ fn load_settings(path: &Path) -> io::Result<Option<Value>> {
     }
 }
 
-#[allow(dead_code)]
 fn atomic_write(path: &Path, contents: &str) -> io::Result<()> {
     let tmp = tempfile_path(path);
     let write_result = fs::write(&tmp, contents);
@@ -90,7 +87,6 @@ fn atomic_write(path: &Path, contents: &str) -> io::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 fn tempfile_path(target: &Path) -> PathBuf {
     let mut name = target
         .file_name()
@@ -98,6 +94,64 @@ fn tempfile_path(target: &Path) -> PathBuf {
         .unwrap_or_else(|| "settings.json".into());
     name.push(".claudehud-tmp");
     target.with_file_name(name)
+}
+
+#[allow(dead_code)]
+pub struct Config {
+    pub settings_path: PathBuf,
+    pub command: String,
+    pub force: bool,
+    pub dry_run: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum Outcome {
+    SkippedMissingParent,
+    Created,
+    Added,
+    Overwrote,
+    SkippedCollision,
+    DryRan,
+}
+
+#[allow(dead_code)]
+fn apply(cfg: &Config) -> io::Result<Outcome> {
+    if let Some(p) = cfg.settings_path.parent() {
+        if !p.as_os_str().is_empty() && !p.exists() {
+            return Ok(Outcome::SkippedMissingParent);
+        }
+    }
+
+    let existing = load_settings(&cfg.settings_path)?;
+    let file_existed = existing.is_some();
+    let had_statusline = existing
+        .as_ref()
+        .and_then(Value::as_object)
+        .map(|o| o.contains_key("statusLine"))
+        .unwrap_or(false);
+
+    let base = existing.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    let updated = set_statusline_command(base, &cfg.command);
+
+    let mut rendered = serde_json::to_string_pretty(&updated)
+        .expect("serialize settings json");
+    rendered.push('\n');
+
+    if cfg.dry_run {
+        print!("{rendered}");
+        return Ok(Outcome::DryRan);
+    }
+
+    atomic_write(&cfg.settings_path, &rendered)?;
+
+    Ok(if !file_existed {
+        Outcome::Created
+    } else if had_statusline {
+        Outcome::Overwrote
+    } else {
+        Outcome::Added
+    })
 }
 
 #[cfg(test)]
@@ -242,5 +296,66 @@ mod tests {
             err.kind(),
             io::ErrorKind::NotFound | io::ErrorKind::Other
         ));
+    }
+
+    #[test]
+    fn install_adds_statusline_to_existing_file() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        fs::write(
+            &settings,
+            r#"{"theme":"dark","hooks":{"PreCompact":[{"matcher":"*"}]}}"#,
+        )
+        .unwrap();
+
+        apply(&Config {
+            settings_path: settings.clone(),
+            command: "/bin/claudehud".into(),
+            force: false,
+            dry_run: false,
+        })
+        .unwrap();
+
+        let got: Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
+        assert_eq!(got["theme"], "dark");
+        assert_eq!(got["hooks"]["PreCompact"][0]["matcher"], "*");
+    }
+
+    #[test]
+    fn install_creates_file_when_missing() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+
+        apply(&Config {
+            settings_path: settings.clone(),
+            command: "/bin/claudehud".into(),
+            force: false,
+            dry_run: false,
+        })
+        .unwrap();
+
+        let got: Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
+        assert_eq!(got.as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn install_silent_skip_when_parent_missing() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("nonexistent").join("settings.json");
+
+        let outcome = apply(&Config {
+            settings_path: settings.clone(),
+            command: "/bin/claudehud".into(),
+            force: false,
+            dry_run: false,
+        })
+        .unwrap();
+
+        assert!(matches!(outcome, Outcome::SkippedMissingParent));
+        assert!(!settings.exists());
     }
 }
