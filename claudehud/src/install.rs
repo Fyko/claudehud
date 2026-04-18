@@ -1,7 +1,7 @@
 //! `claudehud install` — write statusLine config into ~/.claude/settings.json.
 
 use std::fs;
-use std::io;
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -116,7 +116,39 @@ pub enum Outcome {
 }
 
 #[allow(dead_code)]
-fn apply(cfg: &Config) -> io::Result<Outcome> {
+pub enum PromptFn {
+    NonInteractive,
+    Canned(String),
+    Stdin,
+}
+
+impl PromptFn {
+    fn ask(&mut self, path: &Path) -> io::Result<bool> {
+        match self {
+            PromptFn::NonInteractive => Ok(false),
+            PromptFn::Canned(s) => Ok(is_yes(s)),
+            PromptFn::Stdin => {
+                use std::io::Write;
+                let prompt = format!(
+                    "{} already has a statusLine. Overwrite? [y/N] ",
+                    path.display()
+                );
+                io::stderr().write_all(prompt.as_bytes())?;
+                io::stderr().flush()?;
+                let mut line = String::new();
+                io::stdin().read_line(&mut line)?;
+                Ok(is_yes(line.trim()))
+            }
+        }
+    }
+}
+
+fn is_yes(s: &str) -> bool {
+    matches!(s.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+#[allow(dead_code)]
+fn apply_with_prompt(cfg: &Config, prompt: &mut PromptFn) -> io::Result<Outcome> {
     if let Some(p) = cfg.settings_path.parent() {
         if !p.as_os_str().is_empty() && !p.exists() {
             return Ok(Outcome::SkippedMissingParent);
@@ -130,6 +162,13 @@ fn apply(cfg: &Config) -> io::Result<Outcome> {
         .and_then(Value::as_object)
         .map(|o| o.contains_key("statusLine"))
         .unwrap_or(false);
+
+    if had_statusline && !cfg.force {
+        let yes = prompt.ask(&cfg.settings_path)?;
+        if !yes {
+            return Ok(Outcome::SkippedCollision);
+        }
+    }
 
     let base = existing.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
     let updated = set_statusline_command(base, &cfg.command);
@@ -152,6 +191,16 @@ fn apply(cfg: &Config) -> io::Result<Outcome> {
     } else {
         Outcome::Added
     })
+}
+
+#[allow(dead_code)]
+fn apply(cfg: &Config) -> io::Result<Outcome> {
+    let mut prompt = if io::stdin().is_terminal() {
+        PromptFn::Stdin
+    } else {
+        PromptFn::NonInteractive
+    };
+    apply_with_prompt(cfg, &mut prompt)
 }
 
 #[cfg(test)]
@@ -357,5 +406,91 @@ mod tests {
 
         assert!(matches!(outcome, Outcome::SkippedMissingParent));
         assert!(!settings.exists());
+    }
+
+    #[test]
+    fn collision_force_overwrites() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        fs::write(&settings, r#"{"statusLine":{"command":"/old"}}"#).unwrap();
+
+        let outcome = apply_with_prompt(
+            &Config {
+                settings_path: settings.clone(),
+                command: "/new".into(),
+                force: true,
+                dry_run: false,
+            },
+            &mut PromptFn::NonInteractive,
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, Outcome::Overwrote));
+        let got: Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(got["statusLine"]["command"], "/new");
+    }
+
+    #[test]
+    fn collision_non_tty_skips() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        fs::write(&settings, r#"{"statusLine":{"command":"/old"}}"#).unwrap();
+
+        let outcome = apply_with_prompt(
+            &Config {
+                settings_path: settings.clone(),
+                command: "/new".into(),
+                force: false,
+                dry_run: false,
+            },
+            &mut PromptFn::NonInteractive,
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, Outcome::SkippedCollision));
+        let got: Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(got["statusLine"]["command"], "/old", "file should be unchanged");
+    }
+
+    #[test]
+    fn collision_tty_yes_overwrites() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        fs::write(&settings, r#"{"statusLine":{"command":"/old"}}"#).unwrap();
+
+        let outcome = apply_with_prompt(
+            &Config {
+                settings_path: settings.clone(),
+                command: "/new".into(),
+                force: false,
+                dry_run: false,
+            },
+            &mut PromptFn::Canned("y".into()),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, Outcome::Overwrote));
+    }
+
+    #[test]
+    fn collision_tty_no_skips() {
+        let dir = tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        fs::write(&settings, r#"{"statusLine":{"command":"/old"}}"#).unwrap();
+
+        let outcome = apply_with_prompt(
+            &Config {
+                settings_path: settings.clone(),
+                command: "/new".into(),
+                force: false,
+                dry_run: false,
+            },
+            &mut PromptFn::Canned("n".into()),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, Outcome::SkippedCollision));
     }
 }
