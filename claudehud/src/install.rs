@@ -28,6 +28,7 @@ pub fn run(mut args: Arguments) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+#[allow(dead_code)]
 fn resolve_settings_path(
     explicit: Option<PathBuf>,
     config_dir: Option<PathBuf>,
