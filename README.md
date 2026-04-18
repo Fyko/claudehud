@@ -101,7 +101,18 @@ cp target/release/claudehud-daemon ~/.local/bin/
 
 ### Claude Code
 
-In `~/.claude/settings.json`:
+Run `claudehud install` to wire the statusLine into `~/.claude/settings.json`:
+
+```bash
+claudehud install            # prompts if a statusLine already exists
+claudehud install --force    # overwrite without prompting
+claudehud install --dry-run  # print the resulting JSON without writing
+```
+
+`claudehud install --help` lists all flags. Respects `$CLAUDE_CONFIG_DIR` and
+accepts `--settings <path>` to point at a non-default settings file.
+
+Or set it by hand:
 
 ```json
 {
