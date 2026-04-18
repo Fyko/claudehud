@@ -27,8 +27,96 @@ pub fn run(mut args: Arguments) -> ExitCode {
         print!("{HELP}");
         return ExitCode::SUCCESS;
     }
-    // TODO: parse flags, resolve path, edit settings.
-    ExitCode::SUCCESS
+
+    let force = args.contains("--force");
+    let dry_run = args.contains("--dry-run");
+
+    let explicit: Option<PathBuf> = match args.opt_value_from_str("--settings") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("claudehud install: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let remaining = args.finish();
+    if !remaining.is_empty() {
+        eprintln!(
+            "claudehud install: unexpected arguments: {}",
+            remaining
+                .iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        return ExitCode::from(2);
+    }
+
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+
+    let settings_path = match resolve_settings_path(explicit, config_dir, home) {
+        Some(p) => p,
+        None => {
+            eprintln!("claudehud install: cannot locate settings.json (no --settings, $CLAUDE_CONFIG_DIR, or $HOME)");
+            return ExitCode::from(1);
+        }
+    };
+
+    let command = match std::env::current_exe() {
+        Ok(p) => p.display().to_string(),
+        Err(e) => {
+            eprintln!("claudehud install: cannot determine own path: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let cfg = Config {
+        settings_path: settings_path.clone(),
+        command,
+        force,
+        dry_run,
+    };
+
+    match apply(&cfg) {
+        Ok(Outcome::SkippedMissingParent) => ExitCode::SUCCESS,
+        Ok(Outcome::Created) => {
+            println!("==> created {} with statusLine", settings_path.display());
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Added) => {
+            println!("==> added statusLine to {}", settings_path.display());
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Overwrote) => {
+            println!("==> updated statusLine in {}", settings_path.display());
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::SkippedCollision) => {
+            if cfg.force {
+                ExitCode::SUCCESS
+            } else if io::stdin().is_terminal() {
+                println!("==> skipping statusLine configuration");
+                ExitCode::SUCCESS
+            } else {
+                eprintln!(
+                    "claudehud install: {} already has a statusLine",
+                    settings_path.display()
+                );
+                eprintln!("hint: pass --force to overwrite, or run interactively");
+                ExitCode::from(1)
+            }
+        }
+        Ok(Outcome::DryRan) => ExitCode::SUCCESS,
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+            eprintln!("claudehud install: {e}");
+            ExitCode::from(2)
+        }
+        Err(e) => {
+            eprintln!("claudehud install: {e}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn set_statusline_command(value: Value, command: &str) -> Value {
@@ -42,7 +130,6 @@ fn set_statusline_command(value: Value, command: &str) -> Value {
     Value::Object(obj)
 }
 
-#[allow(dead_code)]
 fn resolve_settings_path(
     explicit: Option<PathBuf>,
     config_dir: Option<PathBuf>,
@@ -96,7 +183,6 @@ fn tempfile_path(target: &Path) -> PathBuf {
     target.with_file_name(name)
 }
 
-#[allow(dead_code)]
 pub struct Config {
     pub settings_path: PathBuf,
     pub command: String,
@@ -104,7 +190,6 @@ pub struct Config {
     pub dry_run: bool,
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Outcome {
     SkippedMissingParent,
@@ -147,7 +232,6 @@ fn is_yes(s: &str) -> bool {
     matches!(s.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-#[allow(dead_code)]
 fn apply_with_prompt(cfg: &Config, prompt: &mut PromptFn) -> io::Result<Outcome> {
     if let Some(p) = cfg.settings_path.parent() {
         if !p.as_os_str().is_empty() && !p.exists() {
@@ -193,7 +277,6 @@ fn apply_with_prompt(cfg: &Config, prompt: &mut PromptFn) -> io::Result<Outcome>
     })
 }
 
-#[allow(dead_code)]
 fn apply(cfg: &Config) -> io::Result<Outcome> {
     let mut prompt = if io::stdin().is_terminal() {
         PromptFn::Stdin
