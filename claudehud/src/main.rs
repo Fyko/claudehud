@@ -3,23 +3,32 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use claudehud::render::RoundingMode;
-use claudehud::{git, incidents, input, render};
+use claudehud::{git, incidents, input, install, render};
 
 const HELP: &str = "\
 claudehud
 
 USAGE:
   claudehud [OPTIONS]
+  claudehud install [OPTIONS]
 
 OPTIONS:
   --usage-rounding-mode <MODE>   How to round usage percentages.
                                  Values: floor (default), ceiling, nearest
   -V, --version                  Print version and exit
   -h, --help                     Print this help
+
+SUBCOMMANDS:
+  install                        Configure Claude Code to use this binary
+                                 as its statusLine. See `claudehud install -h`.
 ";
 
 fn main() -> ExitCode {
     let mut args = pico_args::Arguments::from_env();
+
+    if matches!(args.subcommand().ok().flatten().as_deref(), Some("install")) {
+        return install::run(args);
+    }
 
     if args.contains(["-h", "--help"]) {
         print!("{HELP}");

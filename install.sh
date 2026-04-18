@@ -96,67 +96,19 @@ download() {
 # ---------------------------------------------------------------------------
 
 configure_claude() {
-    # skip if user requested no configuration
     [ -n "${CLAUDEHUD_SKIP_CONFIG:-}" ] && {
         say "skipping Claude Code configuration (CLAUDEHUD_SKIP_CONFIG is set)"
         return 0
     }
 
-    settings="$HOME/.claude/settings.json"
+    install_args=""
+    [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ] && install_args="--force"
 
-    # only touch the file if claude settings dir exists or user ran claude already
-    [ -d "$HOME/.claude" ] || return 0
-
-    if [ ! -f "$settings" ]; then
-        printf '{\n  "statusLine": {\n    "command": "%s/claudehud"\n  }\n}\n' \
-            "$INSTALL_DIR" > "$settings"
-        say "created $settings with statusLine config"
-        return
-    fi
-
-    # Check if statusLine already exists
-    if grep -q '"statusLine"' "$settings" 2>/dev/null; then
-        if [ -n "${CLAUDEHUD_FORCE_CONFIG:-}" ]; then
-            # Force override via environment variable
-            if command -v jq >/dev/null 2>&1; then
-                tmp="$(mktemp)"
-                jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
-                    "$settings" > "$tmp" && mv "$tmp" "$settings"
-                say "updated statusLine in $settings (using jq)"
-            else
-                say "~/.claude/settings.json already has statusLine and CLAUDEHUD_FORCE_CONFIG is set"
-                say "jq not found — install jq or manually update statusLine.command to: $INSTALL_DIR/claudehud"
-                say "Example with jq: jq '.statusLine = {command: \"$INSTALL_DIR/claudehud\"}' $settings > $settings.new && mv $settings.new $settings"
-            fi
-        else
-            # Interactive prompt
-            printf '\033[33m%s\033[0m already has a statusLine configuration.\n' "$settings"
-            printf 'Do you want to override it with claudehud? [y/N] '
-            read -r response || true  # Don't exit on read error (e.g., EOF)
-            case "$response" in
-                [yY][eE][sS]|[yY])
-                    if command -v jq >/dev/null 2>&1; then
-                        tmp="$(mktemp)"
-                        jq --arg cmd "$INSTALL_DIR/claudehud" '.statusLine = {command: $cmd}' \
-                            "$settings" > "$tmp" && mv "$tmp" "$settings"
-                        say "updated statusLine in $settings"
-                    else
-                        say "jq not found — please manually update statusLine.command to: $INSTALL_DIR/claudehud"
-                    fi
-                    ;;
-                *)
-                    say "skipping statusLine configuration"
-                    ;;
-            esac
-        fi
-        return
-    fi
-
-    # inject before the last closing brace
-    tmp="$(mktemp)"
-    sed 's/}[[:space:]]*$/,\n  "statusLine": {\n    "command": "'"$INSTALL_DIR"'\/claudehud"\n  }\n}/' \
-        "$settings" > "$tmp" && mv "$tmp" "$settings"
-    say "added statusLine to $settings"
+    # claudehud install is a no-op if ~/.claude doesn't exist yet, and exits
+    # non-zero on collision without --force. Don't let a non-force collision
+    # abort the rest of the install — the subcommand already printed a hint
+    # and the binary is on disk.
+    "$INSTALL_DIR/claudehud" install $install_args || true
 }
 
 # ---------------------------------------------------------------------------
