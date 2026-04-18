@@ -1,4 +1,4 @@
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -57,6 +57,7 @@ fn main() -> ExitCode {
 
     let mut raw = String::new();
     io::stdin().read_to_string(&mut raw).unwrap_or(0);
+    log_stdin(&raw);
 
     if raw.trim().is_empty() {
         print!("Claude");
@@ -73,4 +74,19 @@ fn main() -> ExitCode {
     let incident = incidents::read_incident();
     print!("{}", render::render(&input, git, incident.as_ref(), rounding));
     ExitCode::SUCCESS
+}
+
+fn log_stdin(raw: &str) {
+    let Ok(path) = std::env::var("CLAUDEHUD_LOG") else {
+        return;
+    };
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    else {
+        return;
+    };
+    let ts = time::OffsetDateTime::now_utc().unix_timestamp();
+    let _ = writeln!(f, "--- {ts} ---\n{raw}");
 }

@@ -179,6 +179,9 @@ fn push_rate_row(label: &str, pct: u8, resets_at: Option<u64>, style: ResetStyle
 
 fn context_pct(input: &Input, rounding: RoundingMode) -> u8 {
     let cw = input.context_window.as_ref();
+    if let Some(pct) = cw.and_then(|cw| cw.used_percentage) {
+        return rounding.apply(pct);
+    }
     let size = cw
         .and_then(|cw| cw.context_window_size)
         .filter(|&s| s > 0)
@@ -390,6 +393,34 @@ mod tests {
         // clamping
         assert_eq!(RoundingMode::Ceiling.apply(120.0), 100);
         assert_eq!(RoundingMode::Floor.apply(-5.0), 0);
+    }
+
+    #[test]
+    fn test_render_real_stdin_fixture() {
+        let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
+        let out = render(&input, None, None, RoundingMode::Floor);
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("Opus 4.7"), "model name should render");
+        assert!(plain.contains("22%"), "server-provided used_percentage wins");
+        assert!(plain.contains("project"), "cwd dirname should render");
+        assert!(plain.contains("current"), "five-hour rate row should render");
+        assert!(plain.contains("weekly"), "seven-day rate row should render");
+    }
+
+    #[test]
+    fn test_render_prefers_server_used_percentage() {
+        // current_usage would sum to well over 100%, but used_percentage says 10.
+        let json = r#"{
+            "context_window": {
+                "context_window_size": 200000,
+                "used_percentage": 10,
+                "current_usage": {"input_tokens": 999999, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(&input, None, None, RoundingMode::Floor));
+        assert!(plain.contains("10%"));
+        assert!(!plain.contains("100%"));
     }
 
     #[test]
