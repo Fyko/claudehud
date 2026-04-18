@@ -32,6 +32,18 @@ pub fn run(mut args: Arguments) -> ExitCode {
 }
 
 #[allow(dead_code)]
+fn set_statusline_command(value: Value, command: &str) -> Value {
+    let mut obj = match value {
+        Value::Object(m) => m,
+        _ => serde_json::Map::new(),
+    };
+    let mut sl = serde_json::Map::new();
+    sl.insert("command".to_string(), Value::String(command.to_string()));
+    obj.insert("statusLine".to_string(), Value::Object(sl));
+    Value::Object(obj)
+}
+
+#[allow(dead_code)]
 fn resolve_settings_path(
     explicit: Option<PathBuf>,
     config_dir: Option<PathBuf>,
@@ -128,5 +140,44 @@ mod tests {
         let path = dir.path().join("broken.json");
         fs::write(&path, "not json at all").unwrap();
         assert!(load_settings(&path).is_err());
+    }
+
+    #[test]
+    fn set_on_empty_object() {
+        let v = serde_json::json!({});
+        let got = set_statusline_command(v, "/bin/claudehud");
+        assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
+    }
+
+    #[test]
+    fn set_preserves_sibling_order() {
+        let v: Value = serde_json::from_str(
+            r#"{"theme":"dark","hooks":{"PreCompact":[]},"env":{"FOO":"1"}}"#,
+        )
+        .unwrap();
+        let got = set_statusline_command(v, "/bin/claudehud");
+
+        let keys: Vec<&str> = got.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["theme", "hooks", "env", "statusLine"]);
+    }
+
+    #[test]
+    fn set_overwrites_existing_statusline() {
+        let v: Value = serde_json::from_str(
+            r#"{"statusLine":{"command":"/old/path"},"theme":"dark"}"#,
+        )
+        .unwrap();
+        let got = set_statusline_command(v, "/new/path");
+        assert_eq!(got["statusLine"]["command"], "/new/path");
+        let keys: Vec<&str> = got.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["statusLine", "theme"]);
+    }
+
+    #[test]
+    fn set_on_non_object_replaces_with_object() {
+        let v = serde_json::json!([1, 2, 3]);
+        let got = set_statusline_command(v, "/bin/claudehud");
+        assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
+        assert_eq!(got.as_object().unwrap().len(), 1);
     }
 }
