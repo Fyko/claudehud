@@ -13,9 +13,9 @@ pub fn color_for_pct(pct: u8) -> &'static str {
     if pct >= 90 {
         RED
     } else if pct >= 70 {
-        YELLOW
-    } else if pct >= 50 {
         ORANGE
+    } else if pct >= 50 {
+        YELLOW
     } else {
         GREEN
     }
@@ -67,10 +67,10 @@ mod tests {
     fn test_color_for_pct() {
         assert_eq!(color_for_pct(0), GREEN);
         assert_eq!(color_for_pct(49), GREEN);
-        assert_eq!(color_for_pct(50), ORANGE);
-        assert_eq!(color_for_pct(69), ORANGE);
-        assert_eq!(color_for_pct(70), YELLOW);
-        assert_eq!(color_for_pct(89), YELLOW);
+        assert_eq!(color_for_pct(50), YELLOW);
+        assert_eq!(color_for_pct(69), YELLOW);
+        assert_eq!(color_for_pct(70), ORANGE);
+        assert_eq!(color_for_pct(89), ORANGE);
         assert_eq!(color_for_pct(90), RED);
         assert_eq!(color_for_pct(100), RED);
     }
