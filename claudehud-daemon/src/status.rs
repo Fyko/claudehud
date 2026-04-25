@@ -205,7 +205,7 @@ fn parse_atom_result(xml: &str) -> Result<(Vec<Incident>, u8), roxmltree::Error>
 
     let total = active.len().min(u8::MAX as usize) as u8;
     // Sort by updated_at descending so the most recently updated shows first
-    active.sort_by(|a, b| b.0.cmp(&a.0));
+    active.sort_by_key(|x| std::cmp::Reverse(x.0));
     let incidents: Vec<Incident> = active
         .into_iter()
         .take(MAX_STORED_INCIDENTS)
