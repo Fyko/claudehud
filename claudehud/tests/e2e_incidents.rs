@@ -75,7 +75,7 @@ fn test_e2e_single_ongoing_incident() {
         title: "Elevated API errors".to_string(),
         url: "https://status.claude.com/incidents/single".to_string(),
     };
-    write_incidents_to_tmp(&path, &[incident.clone()], 1);
+    write_incidents_to_tmp(&path, std::slice::from_ref(&incident), 1);
 
     let (read_back, total) = claudehud::incidents::read_incidents_from(&path);
     assert_eq!(total, 1);
@@ -83,14 +83,29 @@ fn test_e2e_single_ongoing_incident() {
     assert_eq!(read_back[0], incident);
 
     let input = claudehud::input::Input::default();
-    let out = claudehud::render::render(&input, None, &read_back, total, claudehud::render::RoundingMode::Floor);
+    let out = claudehud::render::render(
+        &input,
+        None,
+        &read_back,
+        total,
+        claudehud::render::RoundingMode::Floor,
+    );
     let plain = strip_ansi(&out);
 
-    assert!(out.contains(claudehud::fmt::ORANGE), "expected orange color for major severity, got: {plain}");
+    assert!(
+        out.contains(claudehud::fmt::ORANGE),
+        "expected orange color for major severity, got: {plain}"
+    );
     assert!(plain.contains("Elevated API errors"));
-    assert!(plain.contains("started 7m ago"), "expected '7m ago', got: {plain}");
+    assert!(
+        plain.contains("started 7m ago"),
+        "expected '7m ago', got: {plain}"
+    );
     assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/single"));
-    assert!(!plain.contains("more"), "unexpected +N more suffix: {plain}");
+    assert!(
+        !plain.contains("more"),
+        "unexpected +N more suffix: {plain}"
+    );
 
     let _ = std::fs::remove_file(&path);
 }
@@ -119,13 +134,28 @@ fn test_e2e_two_ongoing_incidents() {
     assert_eq!(read_back.len(), 2);
 
     let input = claudehud::input::Input::default();
-    let out = claudehud::render::render(&input, None, &read_back, total, claudehud::render::RoundingMode::Floor);
+    let out = claudehud::render::render(
+        &input,
+        None,
+        &read_back,
+        total,
+        claudehud::render::RoundingMode::Floor,
+    );
     let plain = strip_ansi(&out);
 
-    assert!(out.contains(claudehud::fmt::RED), "expected red color for critical severity, got: {plain}");
+    assert!(
+        out.contains(claudehud::fmt::RED),
+        "expected red color for critical severity, got: {plain}"
+    );
     assert!(plain.contains("API fully down"));
-    assert!(plain.contains("Elevated latency"), "second incident should be visible");
-    assert!(!plain.contains("more"), "no overflow with 2 stored of 2 total");
+    assert!(
+        plain.contains("Elevated latency"),
+        "second incident should be visible"
+    );
+    assert!(
+        !plain.contains("more"),
+        "no overflow with 2 stored of 2 total"
+    );
 
     let _ = std::fs::remove_file(&path);
 }
@@ -144,7 +174,13 @@ fn test_e2e_overflow_shows_plus_n_more() {
 
     let (read_back, total) = claudehud::incidents::read_incidents_from(&path);
     let input = claudehud::input::Input::default();
-    let out = claudehud::render::render(&input, None, &read_back, total, claudehud::render::RoundingMode::Floor);
+    let out = claudehud::render::render(
+        &input,
+        None,
+        &read_back,
+        total,
+        claudehud::render::RoundingMode::Floor,
+    );
     let plain = strip_ansi(&out);
     assert!(plain.contains("+2 more"), "got: {plain}");
     assert!(out.contains("\x1b]8;;https://status.claude.com/\x1b\\"));
@@ -161,7 +197,16 @@ fn test_e2e_no_incident_mmap_absent() {
     assert_eq!(total, 0);
 
     let input = claudehud::input::Input::default();
-    let out = claudehud::render::render(&input, None, &incidents, total, claudehud::render::RoundingMode::Floor);
+    let out = claudehud::render::render(
+        &input,
+        None,
+        &incidents,
+        total,
+        claudehud::render::RoundingMode::Floor,
+    );
     let plain = strip_ansi(&out);
-    assert!(!plain.contains("·"), "incident separator should not appear without incident");
+    assert!(
+        !plain.contains("·"),
+        "incident separator should not appear without incident"
+    );
 }

@@ -154,7 +154,13 @@ fn push_incident_line(inc: &Incident, out: &mut String) {
     out.push_str("\x1b]8;;\x1b\\");
 }
 
-fn push_rate_row(label: &str, pct: u8, resets_at: Option<u64>, style: ResetStyle, out: &mut String) {
+fn push_rate_row(
+    label: &str,
+    pct: u8,
+    resets_at: Option<u64>,
+    style: ResetStyle,
+    out: &mut String,
+) {
     out.push_str(WHITE);
     out.push_str(label);
     out.push_str(RESET);
@@ -281,14 +287,26 @@ mod tests {
     #[test]
     fn test_render_git_branch() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), false)), &[], 0, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            &[],
+            0,
+            RoundingMode::Floor,
+        ));
         assert!(plain.contains("(main)"));
     }
 
     #[test]
     fn test_render_git_dirty() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), true)), &[], 0, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), true)),
+            &[],
+            0,
+            RoundingMode::Floor,
+        ));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
 
@@ -335,7 +353,10 @@ mod tests {
         let input = Input::default();
         let out = render(&input, None, &[incident], 1, RoundingMode::Floor);
         let plain = strip_ansi(&out);
-        assert!(out.contains(fmt::ORANGE), "title should be orange for major severity");
+        assert!(
+            out.contains(fmt::ORANGE),
+            "title should be orange for major severity"
+        );
         assert!(plain.contains("Elevated API errors"));
         assert!(plain.contains("started 12m ago"));
         assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/abc"));
@@ -395,7 +416,10 @@ mod tests {
     fn test_render_no_incident_unchanged_shape() {
         let out = render(&Input::default(), None, &[], 0, RoundingMode::Floor);
         let plain = strip_ansi(&out);
-        assert!(!plain.contains("·"), "incident separator should not appear without incident");
+        assert!(
+            !plain.contains("·"),
+            "incident separator should not appear without incident"
+        );
     }
 
     #[test]
@@ -427,9 +451,15 @@ mod tests {
         let out = render(&input, None, &[], 0, RoundingMode::Floor);
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
-        assert!(plain.contains("22%"), "server-provided used_percentage wins");
+        assert!(
+            plain.contains("22%"),
+            "server-provided used_percentage wins"
+        );
         assert!(plain.contains("project"), "cwd dirname should render");
-        assert!(plain.contains("current"), "five-hour rate row should render");
+        assert!(
+            plain.contains("current"),
+            "five-hour rate row should render"
+        );
         assert!(plain.contains("weekly"), "seven-day rate row should render");
     }
 

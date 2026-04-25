@@ -2,7 +2,9 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use common::{hash_path, mmap_path, read_git_status, seqlock_read, watch_path, MMAP_SIZE, WATCH_DIR};
+use common::{
+    hash_path, mmap_path, read_git_status, seqlock_read, watch_path, MMAP_SIZE, WATCH_DIR,
+};
 use memmap2::Mmap;
 
 /// Returns (branch, is_dirty) for the git repo containing `cwd`.

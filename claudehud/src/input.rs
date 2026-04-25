@@ -136,7 +136,10 @@ mod tests {
     fn test_deserialize_real_stdin_fixture() {
         let input: Input = serde_json::from_str(REAL_STDIN_FIXTURE).unwrap();
 
-        assert_eq!(input.session_id.as_deref(), Some("00000000-0000-0000-0000-000000000000"));
+        assert_eq!(
+            input.session_id.as_deref(),
+            Some("00000000-0000-0000-0000-000000000000")
+        );
         assert_eq!(input.version.as_deref(), Some("2.1.114"));
         assert_eq!(input.cwd.as_deref(), Some("/home/user/project"));
         assert_eq!(input.exceeds_200k_tokens, Some(false));
@@ -172,6 +175,9 @@ mod tests {
 
         let rl = input.rate_limits.as_ref().unwrap();
         assert!((rl.five_hour.as_ref().unwrap().used_percentage.unwrap() - 10.0).abs() < 1e-9);
-        assert_eq!(rl.seven_day.as_ref().unwrap().resets_at, Some(1_776_974_400));
+        assert_eq!(
+            rl.seven_day.as_ref().unwrap().resets_at,
+            Some(1_776_974_400)
+        );
     }
 }

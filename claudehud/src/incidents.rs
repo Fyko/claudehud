@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use common::incidents::{seqlock_read_incidents, Incident, INCIDENTS_MMAP_PATH, INCIDENTS_MMAP_SIZE};
+use common::incidents::{
+    seqlock_read_incidents, Incident, INCIDENTS_MMAP_PATH, INCIDENTS_MMAP_SIZE,
+};
 use memmap2::Mmap;
 
 /// Returns (stored_incidents, total_active_count).
@@ -33,7 +35,8 @@ mod tests {
 
     #[test]
     fn test_read_missing_file_returns_empty() {
-        let path = std::env::temp_dir().join(format!("clhud-test-missing-{}.bin", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("clhud-test-missing-{}.bin", std::process::id()));
         let _ = fs::remove_file(&path);
         let (incidents, total) = read_incidents_from(&path);
         assert!(incidents.is_empty());
@@ -51,7 +54,7 @@ mod tests {
         };
 
         let mut buf = vec![0u8; INCIDENTS_MMAP_SIZE];
-        seqlock_write_incidents(&mut buf, &[incident.clone()], 1);
+        seqlock_write_incidents(&mut buf, std::slice::from_ref(&incident), 1);
         fs::write(&path, &buf).unwrap();
 
         let (got, total) = read_incidents_from(&path);
@@ -64,7 +67,8 @@ mod tests {
 
     #[test]
     fn test_read_wrong_size_file_returns_empty() {
-        let path = std::env::temp_dir().join(format!("clhud-test-trunc-{}.bin", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("clhud-test-trunc-{}.bin", std::process::id()));
         fs::write(&path, b"short").unwrap();
         let (incidents, total) = read_incidents_from(&path);
         assert!(incidents.is_empty());

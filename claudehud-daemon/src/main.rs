@@ -19,7 +19,7 @@ OPTIONS:
 ";
 
 fn main() -> ExitCode {
-    for arg in std::env::args().skip(1) {
+    if let Some(arg) = std::env::args().nth(1) {
         match arg.as_str() {
             "-h" | "--help" => {
                 print!("{HELP}");

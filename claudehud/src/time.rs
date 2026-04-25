@@ -91,8 +91,7 @@ pub fn format_reset_time(epoch: u64, style: ResetStyle) -> String {
         ResetStyle::Time => format!("{h12}:{min:02}{ampm}"),
         ResetStyle::DateTime => {
             const MONTHS: [&str; 12] = [
-                "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
-                "dec",
+                "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
             ];
             let month = MONTHS[dt.month() as usize - 1];
             let day = dt.day();

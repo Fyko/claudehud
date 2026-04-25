@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crossbeam_channel::Sender;
 use common::WATCH_DIR;
+use crossbeam_channel::Sender;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 /// Watch /tmp/clhud-watch/ for new marker files. Each file contains an absolute

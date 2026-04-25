@@ -257,8 +257,7 @@ fn apply_with_prompt(cfg: &Config, prompt: &mut PromptFn) -> io::Result<Outcome>
     let base = existing.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
     let updated = set_statusline_command(base, &cfg.command);
 
-    let mut rendered = serde_json::to_string_pretty(&updated)
-        .expect("serialize settings json");
+    let mut rendered = serde_json::to_string_pretty(&updated).expect("serialize settings json");
     rendered.push('\n');
 
     if cfg.dry_run {
@@ -315,11 +314,7 @@ mod tests {
 
     #[test]
     fn home_is_fallback() {
-        let got = resolve_settings_path(
-            None,
-            None,
-            Some(PathBuf::from("/tmp/home")),
-        );
+        let got = resolve_settings_path(None, None, Some(PathBuf::from("/tmp/home")));
         assert_eq!(got, Some(PathBuf::from("/tmp/home/.claude/settings.json")));
     }
 
@@ -362,25 +357,33 @@ mod tests {
 
     #[test]
     fn set_preserves_sibling_order() {
-        let v: Value = serde_json::from_str(
-            r#"{"theme":"dark","hooks":{"PreCompact":[]},"env":{"FOO":"1"}}"#,
-        )
-        .unwrap();
+        let v: Value =
+            serde_json::from_str(r#"{"theme":"dark","hooks":{"PreCompact":[]},"env":{"FOO":"1"}}"#)
+                .unwrap();
         let got = set_statusline_command(v, "/bin/claudehud");
 
-        let keys: Vec<&str> = got.as_object().unwrap().keys().map(String::as_str).collect();
+        let keys: Vec<&str> = got
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(keys, vec!["theme", "hooks", "env", "statusLine"]);
     }
 
     #[test]
     fn set_overwrites_existing_statusline() {
-        let v: Value = serde_json::from_str(
-            r#"{"statusLine":{"command":"/old/path"},"theme":"dark"}"#,
-        )
-        .unwrap();
+        let v: Value =
+            serde_json::from_str(r#"{"statusLine":{"command":"/old/path"},"theme":"dark"}"#)
+                .unwrap();
         let got = set_statusline_command(v, "/new/path");
         assert_eq!(got["statusLine"]["command"], "/new/path");
-        let keys: Vec<&str> = got.as_object().unwrap().keys().map(String::as_str).collect();
+        let keys: Vec<&str> = got
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(keys, vec!["statusLine", "theme"]);
     }
 
@@ -448,8 +451,7 @@ mod tests {
         })
         .unwrap();
 
-        let got: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let got: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
         assert_eq!(got["theme"], "dark");
         assert_eq!(got["hooks"]["PreCompact"][0]["matcher"], "*");
@@ -468,8 +470,7 @@ mod tests {
         })
         .unwrap();
 
-        let got: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let got: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
         assert_eq!(got.as_object().unwrap().len(), 1);
     }
@@ -509,8 +510,7 @@ mod tests {
         .unwrap();
 
         assert!(matches!(outcome, Outcome::Overwrote));
-        let got: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let got: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(got["statusLine"]["command"], "/new");
     }
 
@@ -532,9 +532,11 @@ mod tests {
         .unwrap();
 
         assert!(matches!(outcome, Outcome::SkippedCollision));
-        let got: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-        assert_eq!(got["statusLine"]["command"], "/old", "file should be unchanged");
+        let got: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            got["statusLine"]["command"], "/old",
+            "file should be unchanged"
+        );
     }
 
     #[test]

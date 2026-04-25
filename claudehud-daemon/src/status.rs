@@ -1,5 +1,7 @@
+use common::incidents::{
+    seqlock_write_incidents, INCIDENTS_MMAP_PATH, INCIDENTS_MMAP_SIZE, MAX_STORED_INCIDENTS,
+};
 use common::incidents::{Incident, Severity};
-use common::incidents::{seqlock_write_incidents, INCIDENTS_MMAP_PATH, INCIDENTS_MMAP_SIZE, MAX_STORED_INCIDENTS};
 use memmap2::MmapMut;
 use std::fs::OpenOptions;
 use std::path::Path;
@@ -22,15 +24,14 @@ pub fn start() {
     loop {
         match fetch_once(&agent, etag.as_deref()) {
             Ok(FetchOutcome::NotModified) => {}
-            Ok(FetchOutcome::Body { body, etag: new_etag }) => {
+            Ok(FetchOutcome::Body {
+                body,
+                etag: new_etag,
+            }) => {
                 etag = new_etag;
                 match parse_atom_result(&body) {
                     Ok((incidents, total)) => {
-                        write_incidents_to_path(
-                            Path::new(INCIDENTS_MMAP_PATH),
-                            &incidents,
-                            total,
-                        );
+                        write_incidents_to_path(Path::new(INCIDENTS_MMAP_PATH), &incidents, total);
                     }
                     Err(e) => eprintln!("WARN status parse: {e}"),
                 }
@@ -57,7 +58,10 @@ fn fetch_once(agent: &ureq::Agent, etag: Option<&str>) -> Result<FetchOutcome, S
         Ok(resp) => {
             let new_etag = resp.header("ETag").map(|s| s.to_string());
             let body = resp.into_string().map_err(|e| e.to_string())?;
-            Ok(FetchOutcome::Body { body, etag: new_etag })
+            Ok(FetchOutcome::Body {
+                body,
+                etag: new_etag,
+            })
         }
         Err(ureq::Error::Status(304, _)) => Ok(FetchOutcome::NotModified),
         Err(e) => Err(e.to_string()),
@@ -188,12 +192,20 @@ fn parse_atom_result(xml: &str) -> Result<(Vec<Incident>, u8), roxmltree::Error>
             .and_then(parse_iso8601_secs)
             .unwrap_or(started_at);
 
-        active.push((updated_at, Incident { severity, started_at, title: subject.to_string(), url }));
+        active.push((
+            updated_at,
+            Incident {
+                severity,
+                started_at,
+                title: subject.to_string(),
+                url,
+            },
+        ));
     }
 
     let total = active.len().min(u8::MAX as usize) as u8;
     // Sort by updated_at descending so the most recently updated shows first
-    active.sort_by(|a, b| b.0.cmp(&a.0));
+    active.sort_by_key(|x| std::cmp::Reverse(x.0));
     let incidents: Vec<Incident> = active
         .into_iter()
         .take(MAX_STORED_INCIDENTS)
@@ -216,7 +228,10 @@ fn parse_iso8601_secs(s: &str) -> Option<u64> {
     let sec: i64 = s.get(17..19)?.parse().ok()?;
 
     let after = &s[19..];
-    let tz = after.find(['Z', '+', '-']).map(|i| &after[i..]).unwrap_or("Z");
+    let tz = after
+        .find(['Z', '+', '-'])
+        .map(|i| &after[i..])
+        .unwrap_or("Z");
     let tz_offset: i64 = if tz.starts_with('Z') {
         0
     } else {
@@ -434,7 +449,10 @@ mod tests {
     fn test_parse_real_feed_format_active() {
         let (incidents, total) = parse_atom(REAL_FEED_ACTIVE);
         assert_eq!(total, 1);
-        assert_eq!(incidents[0].title, "Elevated error rates on Claude Opus 4.7");
+        assert_eq!(
+            incidents[0].title,
+            "Elevated error rates on Claude Opus 4.7"
+        );
         assert!(incidents[0].url.contains("q93x64nrhwnn"));
     }
 
@@ -462,7 +480,10 @@ mod tests {
             super::extract_phase_from_html("<p><strong>Investigating</strong> - details</p>"),
             Some("Investigating")
         );
-        assert_eq!(super::extract_phase_from_html("<p>no strong tags</p>"), None);
+        assert_eq!(
+            super::extract_phase_from_html("<p>no strong tags</p>"),
+            None
+        );
     }
 
     #[test]

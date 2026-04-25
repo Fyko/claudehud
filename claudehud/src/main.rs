@@ -41,13 +41,15 @@ fn main() -> ExitCode {
     }
 
     let rounding = match args.opt_value_from_str::<_, String>("--usage-rounding-mode") {
-        Ok(Some(s)) => match RoundingMode::parse(&s) {
-            Some(m) => m,
-            None => {
-                eprintln!("claudehud: unknown --usage-rounding-mode '{s}' (want: floor|ceiling|nearest)");
-                return ExitCode::from(2);
+        Ok(Some(s)) => {
+            match RoundingMode::parse(&s) {
+                Some(m) => m,
+                None => {
+                    eprintln!("claudehud: unknown --usage-rounding-mode '{s}' (want: floor|ceiling|nearest)");
+                    return ExitCode::from(2);
+                }
             }
-        },
+        }
         Ok(None) => RoundingMode::default(),
         Err(e) => {
             eprintln!("claudehud: {e}");
@@ -72,7 +74,10 @@ fn main() -> ExitCode {
         .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
 
     let (incidents, total_active) = incidents::read_incidents();
-    print!("{}", render::render(&input, git, &incidents, total_active, rounding));
+    print!(
+        "{}",
+        render::render(&input, git, &incidents, total_active, rounding)
+    );
     ExitCode::SUCCESS
 }
 
