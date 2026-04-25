@@ -1,5 +1,7 @@
 # claudehud
 
+![example.png](docs/example.png)
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fyko/claudehud/main/install.sh | sh
 ```
@@ -7,10 +9,6 @@ curl -fsSL https://raw.githubusercontent.com/fyko/claudehud/main/install.sh | sh
 A Rust rewrite of my personal Claude Code statusline bash script. Renders in ~2.6ms instead of ~437ms by replacing bash interpreter startup + multiple `jq`/`git` subprocess calls with a compiled binary and an mmap-backed git status daemon.
 
 Inspired by [kamranahmedse/claude-statusline](https://github.com/kamranahmedse/claude-statusline).
-
-## Output
-
-![example.png](docs/example.png)
 
 ## Status incidents
 
