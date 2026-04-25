@@ -71,8 +71,8 @@ fn main() -> ExitCode {
         .filter(|s| !s.is_empty())
         .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
 
-    let incident = incidents::read_incident();
-    print!("{}", render::render(&input, git, incident.as_ref(), rounding));
+    let (incidents, total_active) = incidents::read_incidents();
+    print!("{}", render::render(&input, git, &incidents, total_active, rounding));
     ExitCode::SUCCESS
 }
 
