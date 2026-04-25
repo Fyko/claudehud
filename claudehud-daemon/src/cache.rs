@@ -57,7 +57,6 @@ pub fn seqlock_write(buf: &mut [u8], branch: &str, dirty: bool) {
     buf[0..8].copy_from_slice(&seq2.wrapping_add(1).to_le_bytes());
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

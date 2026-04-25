@@ -67,8 +67,15 @@ pub fn seqlock_read_incidents(mmap: &[u8]) -> (Vec<Incident>, u8) {
             let title_len = (mmap[b + 9] as usize).min(TITLE_MAX);
             let title = String::from_utf8_lossy(&mmap[b + 10..b + 10 + title_len]).into_owned();
             let url_len = (mmap[b + 10 + TITLE_MAX] as usize).min(URL_MAX);
-            let url = String::from_utf8_lossy(&mmap[b + 11 + TITLE_MAX..b + 11 + TITLE_MAX + url_len]).into_owned();
-            incidents.push(Incident { severity, started_at, title, url });
+            let url =
+                String::from_utf8_lossy(&mmap[b + 11 + TITLE_MAX..b + 11 + TITLE_MAX + url_len])
+                    .into_owned();
+            incidents.push(Incident {
+                severity,
+                started_at,
+                title,
+                url,
+            });
         }
 
         fence(Ordering::Acquire);
@@ -93,6 +100,7 @@ pub fn seqlock_write_incidents(buf: &mut [u8], incidents: &[Incident], total: u8
     buf[8] = total;
     buf[9] = stored as u8;
 
+    #[allow(clippy::needless_range_loop)]
     for i in 0..MAX_STORED_INCIDENTS {
         let b = 10 + i * SLOT_SIZE;
         if i < stored {
@@ -144,7 +152,7 @@ mod tests {
             title: "Elevated errors".to_string(),
             url: "https://status.claude.com/incidents/abc".to_string(),
         };
-        seqlock_write_incidents(&mut buf, &[inc.clone()], 1);
+        seqlock_write_incidents(&mut buf, std::slice::from_ref(&inc), 1);
         let (got, total) = seqlock_read_incidents(&buf);
         assert_eq!(total, 1);
         assert_eq!(got.len(), 1);
