@@ -39,7 +39,8 @@ impl RoundingMode {
 pub fn render(
     input: &Input,
     git: Option<(String, bool)>,
-    incident: Option<&Incident>,
+    incidents: &[Incident],
+    total_active: u8,
     rounding: RoundingMode,
 ) -> String {
     let mut out = String::with_capacity(512);
@@ -97,10 +98,19 @@ pub fn render(
         out.push_str(RESET);
     }
 
-    // ── Incident line (between line 1 and rate limits) ─────
-    if let Some(inc) = incident {
+    // ── Incident lines (between line 1 and rate limits) ────
+    for inc in incidents {
         out.push('\n');
         push_incident_line(inc, &mut out);
+    }
+    let overflow = total_active.saturating_sub(incidents.len() as u8);
+    if overflow > 0 {
+        out.push('\n');
+        write!(out, "\x1b]8;;https://status.claude.com/\x1b\\").unwrap();
+        out.push_str(DIM);
+        write!(out, "+{overflow} more").unwrap();
+        out.push_str(RESET);
+        out.push_str("\x1b]8;;\x1b\\");
     }
 
     // ── Rate limits ────────────────────────────────────────
@@ -136,27 +146,21 @@ fn push_incident_line(inc: &Incident, out: &mut String) {
 
     write!(out, "\x1b]8;;{url}\x1b\\").unwrap();
     out.push_str(fmt::color_for_severity(inc.severity));
-    out.push_str(fmt::severity_icon(inc.severity));
-    out.push(' ');
-    out.push_str(WHITE);
     out.push_str(&inc.title);
     out.push(' ');
     out.push_str(DIM);
     write!(out, "· started {since} ago").unwrap();
     out.push_str(RESET);
     out.push_str("\x1b]8;;\x1b\\");
-
-    if inc.active_count > 1 {
-        out.push(' ');
-        write!(out, "\x1b]8;;https://status.claude.com/\x1b\\").unwrap();
-        out.push_str(DIM);
-        write!(out, "+{} more", inc.active_count - 1).unwrap();
-        out.push_str(RESET);
-        out.push_str("\x1b]8;;\x1b\\");
-    }
 }
 
-fn push_rate_row(label: &str, pct: u8, resets_at: Option<u64>, style: ResetStyle, out: &mut String) {
+fn push_rate_row(
+    label: &str,
+    pct: u8,
+    resets_at: Option<u64>,
+    style: ResetStyle,
+    out: &mut String,
+) {
     out.push_str(WHITE);
     out.push_str(label);
     out.push_str(RESET);
@@ -179,6 +183,9 @@ fn push_rate_row(label: &str, pct: u8, resets_at: Option<u64>, style: ResetStyle
 
 fn context_pct(input: &Input, rounding: RoundingMode) -> u8 {
     let cw = input.context_window.as_ref();
+    if let Some(pct) = cw.and_then(|cw| cw.used_percentage) {
+        return rounding.apply(pct);
+    }
     let size = cw
         .and_then(|cw| cw.context_window_size)
         .filter(|&s| s > 0)
@@ -248,7 +255,7 @@ mod tests {
     #[test]
     fn test_render_default_model() {
         let input = Input::default();
-        let result = render(&input, None, None, RoundingMode::Floor);
+        let result = render(&input, None, &[], 0, RoundingMode::Floor);
         let plain = strip_ansi(&result);
         assert!(
             plain.contains("Claude"),
@@ -260,7 +267,7 @@ mod tests {
     fn test_render_model_name() {
         let json = r#"{"model": {"display_name": "claude-sonnet-4-5"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, None, RoundingMode::Floor));
+        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
         assert!(plain.contains("claude-sonnet-4-5"));
     }
 
@@ -273,21 +280,33 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, None, RoundingMode::Floor));
+        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
         assert!(plain.contains("50%"));
     }
 
     #[test]
     fn test_render_git_branch() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), false)), None, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            &[],
+            0,
+            RoundingMode::Floor,
+        ));
         assert!(plain.contains("(main)"));
     }
 
     #[test]
     fn test_render_git_dirty() {
         let input = Input::default();
-        let plain = strip_ansi(&render(&input, Some(("main".to_string(), true)), None, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), true)),
+            &[],
+            0,
+            RoundingMode::Floor,
+        ));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
 
@@ -295,7 +314,7 @@ mod tests {
     fn test_render_dirname() {
         let json = r#"{"cwd": "/home/user/myproject"}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, None, RoundingMode::Floor));
+        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
         assert!(plain.contains("myproject"));
     }
 
@@ -308,7 +327,7 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, None, RoundingMode::Floor);
+        let result = render(&input, None, &[], 0, RoundingMode::Floor);
         assert!(
             result.contains('\n'),
             "should have newlines for rate limits"
@@ -330,12 +349,14 @@ mod tests {
                 .saturating_sub(12 * 60),
             title: "Elevated API errors".to_string(),
             url: "https://status.claude.com/incidents/abc".to_string(),
-            active_count: 1,
         };
         let input = Input::default();
-        let out = render(&input, None, Some(&incident), RoundingMode::Floor);
+        let out = render(&input, None, &[incident], 1, RoundingMode::Floor);
         let plain = strip_ansi(&out);
-        assert!(plain.contains("🟠"));
+        assert!(
+            out.contains(fmt::ORANGE),
+            "title should be orange for major severity"
+        );
         assert!(plain.contains("Elevated API errors"));
         assert!(plain.contains("started 12m ago"));
         assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/abc"));
@@ -345,28 +366,60 @@ mod tests {
     #[test]
     fn test_render_incident_with_plus_n_more() {
         use common::incidents::{Incident, Severity};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let incident = Incident {
             severity: Severity::Minor,
-            started_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            started_at: now,
             title: "Thing A".to_string(),
             url: "https://status.claude.com/incidents/a".to_string(),
-            active_count: 3,
         };
-        let out = render(&Input::default(), None, Some(&incident), RoundingMode::Floor);
+        // 1 stored, total=3 → "+2 more"
+        let out = render(&Input::default(), None, &[incident], 3, RoundingMode::Floor);
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
     }
 
     #[test]
-    fn test_render_no_incident_unchanged_shape() {
-        let out = render(&Input::default(), None, None, RoundingMode::Floor);
+    fn test_render_multiple_incidents() {
+        use common::incidents::{Incident, Severity};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let incidents = vec![
+            Incident {
+                severity: Severity::Critical,
+                started_at: now.saturating_sub(5 * 60),
+                title: "API down".to_string(),
+                url: "https://status.claude.com/incidents/x".to_string(),
+            },
+            Incident {
+                severity: Severity::Minor,
+                started_at: now.saturating_sub(20 * 60),
+                title: "Elevated latency".to_string(),
+                url: "https://status.claude.com/incidents/y".to_string(),
+            },
+        ];
+        let out = render(&Input::default(), None, &incidents, 2, RoundingMode::Floor);
         let plain = strip_ansi(&out);
-        for icon in ["🟡", "🟠", "🔴", "🔧"] {
-            assert!(!plain.contains(icon), "unexpected icon: {icon}");
-        }
+        assert!(plain.contains("API down"));
+        assert!(plain.contains("Elevated latency"));
+        assert!(!plain.contains("more"));
+        assert!(out.contains(fmt::RED));
+        assert!(out.contains(fmt::YELLOW));
+    }
+
+    #[test]
+    fn test_render_no_incident_unchanged_shape() {
+        let out = render(&Input::default(), None, &[], 0, RoundingMode::Floor);
+        let plain = strip_ansi(&out);
+        assert!(
+            !plain.contains("·"),
+            "incident separator should not appear without incident"
+        );
     }
 
     #[test]
@@ -393,6 +446,40 @@ mod tests {
     }
 
     #[test]
+    fn test_render_real_stdin_fixture() {
+        let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
+        let out = render(&input, None, &[], 0, RoundingMode::Floor);
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("Opus 4.7"), "model name should render");
+        assert!(
+            plain.contains("22%"),
+            "server-provided used_percentage wins"
+        );
+        assert!(plain.contains("project"), "cwd dirname should render");
+        assert!(
+            plain.contains("current"),
+            "five-hour rate row should render"
+        );
+        assert!(plain.contains("weekly"), "seven-day rate row should render");
+    }
+
+    #[test]
+    fn test_render_prefers_server_used_percentage() {
+        // current_usage would sum to well over 100%, but used_percentage says 10.
+        let json = r#"{
+            "context_window": {
+                "context_window_size": 200000,
+                "used_percentage": 10,
+                "current_usage": {"input_tokens": 999999, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
+        assert!(plain.contains("10%"));
+        assert!(!plain.contains("100%"));
+    }
+
+    #[test]
     fn test_render_context_pct_rounding_modes() {
         // 100_001 / 200_000 = 50.0005%
         let json = r#"{
@@ -402,8 +489,8 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        assert!(strip_ansi(&render(&input, None, None, RoundingMode::Floor)).contains("50%"));
-        assert!(strip_ansi(&render(&input, None, None, RoundingMode::Ceiling)).contains("51%"));
-        assert!(strip_ansi(&render(&input, None, None, RoundingMode::Nearest)).contains("50%"));
+        assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor)).contains("50%"));
+        assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Ceiling)).contains("51%"));
+        assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Nearest)).contains("50%"));
     }
 }

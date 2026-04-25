@@ -13,25 +13,15 @@ pub fn color_for_pct(pct: u8) -> &'static str {
     if pct >= 90 {
         RED
     } else if pct >= 70 {
-        YELLOW
-    } else if pct >= 50 {
         ORANGE
+    } else if pct >= 50 {
+        YELLOW
     } else {
         GREEN
     }
 }
 
 use common::incidents::Severity;
-
-pub fn severity_icon(sev: Severity) -> &'static str {
-    match sev {
-        Severity::Minor => "🟡",
-        Severity::Major => "🟠",
-        Severity::Critical => "🔴",
-        Severity::Maintenance => "🔧",
-        Severity::None => "",
-    }
-}
 
 pub fn color_for_severity(sev: Severity) -> &'static str {
     match sev {
@@ -67,10 +57,10 @@ mod tests {
     fn test_color_for_pct() {
         assert_eq!(color_for_pct(0), GREEN);
         assert_eq!(color_for_pct(49), GREEN);
-        assert_eq!(color_for_pct(50), ORANGE);
-        assert_eq!(color_for_pct(69), ORANGE);
-        assert_eq!(color_for_pct(70), YELLOW);
-        assert_eq!(color_for_pct(89), YELLOW);
+        assert_eq!(color_for_pct(50), YELLOW);
+        assert_eq!(color_for_pct(69), YELLOW);
+        assert_eq!(color_for_pct(70), ORANGE);
+        assert_eq!(color_for_pct(89), ORANGE);
         assert_eq!(color_for_pct(90), RED);
         assert_eq!(color_for_pct(100), RED);
     }
@@ -97,16 +87,6 @@ mod tests {
         build_bar(0, 10, &mut s);
         let plain: String = s.chars().filter(|&c| c == '●' || c == '○').collect();
         assert_eq!(plain, "○○○○○○○○○○");
-    }
-
-    #[test]
-    fn test_severity_icon() {
-        use common::incidents::Severity;
-        assert_eq!(severity_icon(Severity::Minor), "🟡");
-        assert_eq!(severity_icon(Severity::Major), "🟠");
-        assert_eq!(severity_icon(Severity::Critical), "🔴");
-        assert_eq!(severity_icon(Severity::Maintenance), "🔧");
-        assert_eq!(severity_icon(Severity::None), "");
     }
 
     #[test]

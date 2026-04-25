@@ -3,7 +3,7 @@ members = ["common", "claudehud", "claudehud-daemon"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 edition = "2021"
 
 [workspace.dependencies]
