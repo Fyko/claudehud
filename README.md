@@ -1,8 +1,10 @@
 # claudehud
 
-[![Scorecard](https://api.securityscorecards.dev/projects/github.com/Fyko/claudehud/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Fyko/claudehud)
+```bash
+curl -fsSL https://raw.githubusercontent.com/fyko/claudehud/main/install.sh | sh
+```
 
-A Rust rewrite of the Claude Code statusline bash script. Renders in ~2.6ms instead of ~437ms by replacing bash interpreter startup + multiple `jq`/`git` subprocess calls with a compiled binary and an mmap-backed git status daemon.
+A Rust rewrite of my personal Claude Code statusline bash script. Renders in ~2.6ms instead of ~437ms by replacing bash interpreter startup + multiple `jq`/`git` subprocess calls with a compiled binary and an mmap-backed git status daemon.
 
 Inspired by [kamranahmedse/claude-statusline](https://github.com/kamranahmedse/claude-statusline).
 
@@ -10,14 +12,12 @@ Inspired by [kamranahmedse/claude-statusline](https://github.com/kamranahmedse/c
 
 ![example.png](docs/example.png)
 
-Line 1 always renders. Lines 2–3 appear only when rate limit data is present.
-
 ## Status incidents
 
 When `status.claude.com` reports an active incident (or in-progress scheduled maintenance), `claudehud` emits a hyperlinked line directly below line 1:
 
 ```
-🟡 Elevated API errors · started 12m ago    +1 more
+Elevated API errors · started 12m ago    +1 more
 ```
 
 The daemon polls `https://status.claude.com/history.atom` every 5 minutes using a conditional GET, so most hits return 304 Not Modified. When an incident is active, the most-recently-updated entry is shown; the `+N more` suffix appears when more than one incident or in-progress maintenance is active and links to the main status page. The line disappears automatically once every incident transitions to Resolved or Completed.
