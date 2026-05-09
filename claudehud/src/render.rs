@@ -891,6 +891,21 @@ mod tests {
     }
 
     #[test]
+    fn test_render_condensed_only_7d() {
+        let json = r#"{
+            "rate_limits": {
+                "seven_day": {"used_percentage": 12.0, "resets_at": 1705833600}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let plain = strip_ansi(&result);
+        assert!(plain.contains("7d"));
+        assert!(plain.contains("12%"));
+        assert!(!plain.contains("5h"));
+    }
+
+    #[test]
     fn test_render_git_dirty_condensed() {
         let input = Input::default();
         let out = render(
