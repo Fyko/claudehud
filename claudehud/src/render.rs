@@ -36,6 +36,23 @@ impl RoundingMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layout {
+    #[default]
+    Comfortable,
+    Condensed,
+}
+
+impl Layout {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "comfortable" => Some(Self::Comfortable),
+            "condensed" => Some(Self::Condensed),
+            _ => None,
+        }
+    }
+}
+
 pub fn render(
     input: &Input,
     git: Option<(String, bool)>,
@@ -492,5 +509,21 @@ mod tests {
         assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor)).contains("50%"));
         assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Ceiling)).contains("51%"));
         assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Nearest)).contains("50%"));
+    }
+
+    #[test]
+    fn test_layout_parse() {
+        assert_eq!(Layout::parse("comfortable"), Some(Layout::Comfortable));
+        assert_eq!(Layout::parse("COMFORTABLE"), Some(Layout::Comfortable));
+        assert_eq!(Layout::parse("condensed"), Some(Layout::Condensed));
+        assert_eq!(Layout::parse("Condensed"), Some(Layout::Condensed));
+        assert_eq!(Layout::parse(""), None);
+        assert_eq!(Layout::parse("compact"), None);
+        assert_eq!(Layout::parse("garbage"), None);
+    }
+
+    #[test]
+    fn test_layout_default_is_comfortable() {
+        assert_eq!(Layout::default(), Layout::Comfortable);
     }
 }
