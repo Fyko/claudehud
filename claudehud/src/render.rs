@@ -113,14 +113,62 @@ fn render_comfortable(
 }
 
 fn render_condensed(
-    _input: &Input,
-    _git: Option<(String, bool)>,
-    _incidents: &[Incident],
-    _total_active: u8,
-    _rounding: RoundingMode,
+    input: &Input,
+    git: Option<(String, bool)>,
+    incidents: &[Incident],
+    total_active: u8,
+    rounding: RoundingMode,
 ) -> String {
-    // Implemented in Task 5.
-    String::new()
+    let mut out = String::with_capacity(512);
+
+    // ── Model (short) ──────────────────────────────────────
+    push_model_short(input, &mut out);
+
+    // ── Context usage ──────────────────────────────────────
+    out.push_str(SEP);
+    push_context(input, rounding, &mut out);
+
+    // ── Dir + git (tight) ──────────────────────────────────
+    out.push_str(SEP);
+    push_dir_branch(input, git.as_ref(), true, &mut out);
+
+    // ── Rate limits inline ─────────────────────────────────
+    if let Some(rl) = &input.rate_limits {
+        if let Some(fh) = &rl.five_hour {
+            if let Some(pct_f) = fh.used_percentage {
+                let pct = rounding.apply(pct_f);
+                out.push_str(SEP);
+                push_rate_inline("5h", pct, fh.resets_at, ResetStyle::Time, &mut out);
+            }
+        }
+        if let Some(sd) = &rl.seven_day {
+            if let Some(pct_f) = sd.used_percentage {
+                let pct = rounding.apply(pct_f);
+                out.push_str(SEP);
+                push_rate_inline("7d", pct, sd.resets_at, ResetStyle::DateTime, &mut out);
+            }
+        }
+    }
+
+    // ── Incidents ──────────────────────────────────────────
+    push_incidents(incidents, total_active, &mut out);
+
+    out
+}
+
+fn push_model_short(input: &Input, out: &mut String) {
+    let raw = input
+        .model
+        .as_ref()
+        .and_then(|m| m.display_name.as_deref())
+        .unwrap_or("Claude");
+    let short = raw
+        .split_once(" (")
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(raw);
+    out.push_str(BLUE);
+    out.push_str(short);
+    out.push_str(RESET);
 }
 
 fn push_model_full(input: &Input, out: &mut String) {
@@ -201,6 +249,33 @@ fn push_incident_line(inc: &Incident, out: &mut String) {
     write!(out, "· started {since} ago").unwrap();
     out.push_str(RESET);
     out.push_str("\x1b]8;;\x1b\\");
+}
+
+fn push_rate_inline(
+    label: &str,
+    pct: u8,
+    resets_at: Option<u64>,
+    style: ResetStyle,
+    out: &mut String,
+) {
+    fmt::build_bar(pct, 4, out);
+    out.push(' ');
+    out.push_str(WHITE);
+    out.push_str(label);
+    out.push_str(RESET);
+    out.push(' ');
+    out.push_str(color_for_pct(pct));
+    write!(out, "{pct}%").unwrap();
+    out.push_str(RESET);
+    if let Some(epoch) = resets_at.filter(|&e| e > 0) {
+        out.push(' ');
+        out.push_str(DIM);
+        out.push_str("⟳ ");
+        out.push_str(RESET);
+        out.push_str(WHITE);
+        out.push_str(&format_reset_time(epoch, style));
+        out.push_str(RESET);
+    }
 }
 
 fn push_rate_row(
@@ -653,6 +728,237 @@ mod tests {
     #[test]
     fn test_layout_default_is_comfortable() {
         assert_eq!(Layout::default(), Layout::Comfortable);
+    }
+
+    // ── Condensed layout tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_default_model_condensed() {
+        let input = Input::default();
+        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let plain = strip_ansi(&result);
+        assert!(plain.contains("Claude"), "default model name should render");
+    }
+
+    #[test]
+    fn test_render_model_name_condensed_strips_paren() {
+        let json = r#"{"model": {"display_name": "Opus 4.7 (1M context)"}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(plain.contains("Opus 4.7"), "short model name should render");
+        assert!(
+            !plain.contains("(1M context)"),
+            "parenthetical suffix should be stripped"
+        );
+    }
+
+    #[test]
+    fn test_render_dir_branch_condensed_tight() {
+        let json = r#"{"cwd": "/home/user/myproject"}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(
+            plain.contains("myproject(main)"),
+            "dir and branch should be tight (no space)"
+        );
+        assert!(
+            !plain.contains("myproject (main)"),
+            "comfortable spacing should not appear"
+        );
+    }
+
+    #[test]
+    fn test_render_rate_limits_condensed_inline() {
+        let json = r#"{
+            "rate_limits": {
+                "five_hour": {"used_percentage": 9.0, "resets_at": 1705316400},
+                "seven_day": {"used_percentage": 12.0, "resets_at": 1705833600}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let plain = strip_ansi(&result);
+
+        assert!(plain.contains("5h"), "5h label should render");
+        assert!(plain.contains("7d"), "7d label should render");
+        assert!(
+            !plain.contains("current"),
+            "comfortable label should not appear"
+        );
+        assert!(
+            !plain.contains("weekly"),
+            "comfortable label should not appear"
+        );
+
+        assert!(plain.contains("9%"), "5h pct should render");
+        assert!(plain.contains("12%"), "7d pct should render");
+
+        let dots = plain.matches('○').count() + plain.matches('●').count();
+        assert!(dots >= 8, "expected ≥8 bar dots inline (got {dots})");
+
+        assert!(
+            !result.contains('\n'),
+            "condensed idle output should be single-line"
+        );
+    }
+
+    #[test]
+    fn test_render_incident_condensed_keeps_own_line() {
+        use common::incidents::{Incident, Severity};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let incident = Incident {
+            severity: Severity::Major,
+            started_at: now.saturating_sub(12 * 60),
+            title: "Elevated API errors".to_string(),
+            url: "https://status.claude.com/incidents/abc".to_string(),
+        };
+        let out = render(
+            &Input::default(),
+            None,
+            &[incident],
+            1,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("Elevated API errors"));
+        assert!(plain.contains("started 12m ago"));
+        assert_eq!(out.matches('\n').count(), 1, "exactly one newline expected");
+        assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/abc"));
+    }
+
+    #[test]
+    fn test_render_context_pct_condensed() {
+        let json = r#"{
+            "context_window": {
+                "context_window_size": 200000,
+                "current_usage": {"input_tokens": 100000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(plain.contains("50%"));
+    }
+
+    #[test]
+    fn test_render_condensed_no_rate_limits() {
+        let input = Input::default();
+        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let plain = strip_ansi(&result);
+        assert!(plain.contains("Claude"));
+        assert!(!plain.contains("5h"));
+        assert!(!plain.contains("7d"));
+        assert!(!result.contains('\n'));
+    }
+
+    #[test]
+    fn test_render_condensed_only_5h() {
+        let json = r#"{
+            "rate_limits": {
+                "five_hour": {"used_percentage": 9.0, "resets_at": 1705316400}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let plain = strip_ansi(&result);
+        assert!(plain.contains("5h"));
+        assert!(plain.contains("9%"));
+        assert!(!plain.contains("7d"));
+    }
+
+    #[test]
+    fn test_render_git_dirty_condensed() {
+        let input = Input::default();
+        let out = render(
+            &input,
+            Some(("main".to_string(), true)),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
+        let plain = strip_ansi(&out);
+        assert!(
+            plain.contains("(main*)"),
+            "dirty marker should appear inside paren"
+        );
+    }
+
+    #[test]
+    fn test_render_incident_plus_n_more_condensed() {
+        use common::incidents::{Incident, Severity};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let incident = Incident {
+            severity: Severity::Minor,
+            started_at: now,
+            title: "Thing A".to_string(),
+            url: "https://status.claude.com/incidents/a".to_string(),
+        };
+        let out = render(
+            &Input::default(),
+            None,
+            &[incident],
+            3,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("+2 more"));
+        assert_eq!(out.matches('\n').count(), 2);
+    }
+
+    #[test]
+    fn test_render_real_stdin_fixture_condensed() {
+        let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
+        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("Opus 4.7"), "model name should render");
+        assert!(
+            plain.contains("22%"),
+            "server-provided used_percentage wins"
+        );
+        assert!(plain.contains("project"), "cwd dirname should render");
+        assert!(plain.contains("5h"), "5h rate label should render");
+        assert!(plain.contains("7d"), "7d rate label should render");
+        assert!(
+            !plain.contains("current"),
+            "comfortable label should not appear"
+        );
+        assert!(
+            !plain.contains("weekly"),
+            "comfortable label should not appear"
+        );
+        assert!(
+            !out.contains('\n'),
+            "fixture has no incidents → single-line output"
+        );
     }
 
     #[test]
