@@ -97,6 +97,33 @@ cp target/release/claudehud-daemon ~/.local/bin/
 
 ## Configuration
 
+### Layout
+
+Two render layouts: `comfortable` (default) and `condensed`. Set with the `CLAUDEHUD_LAYOUT` environment variable.
+
+```bash
+CLAUDEHUD_LAYOUT=condensed
+```
+
+Comfortable renders the HUD across multiple lines with full bars and a blank gap before rate limits:
+
+```
+Opus 4.7 (1M context) │ ✍️ 4% │ claudehud (main*)
+
+current ○○○○○○○○○○   9% ⟳ 10:50am
+weekly  ●○○○○○○○○○  12% ⟳ apr 25, 7:00pm
+```
+
+Condensed collapses everything onto a single line, with shorter rate-limit bars (4 dots) inline:
+
+```
+Opus 4.7 │ ✍️ 4% │ claudehud(main*) │ ○○○○ 5h 9% ⟳ 10:50am │ ○○○○ 7d 12% ⟳ apr 25, 7:00pm
+```
+
+Active incidents still render on their own line below row 1 in both layouts.
+
+Unknown values (`CLAUDEHUD_LAYOUT=foo`) print a warning to stderr and fall back to `comfortable`.
+
 ### Claude Code
 
 Run `claudehud install` to wire the statusLine into `~/.claude/settings.json`:
