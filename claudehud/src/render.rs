@@ -59,6 +59,20 @@ pub fn render(
     incidents: &[Incident],
     total_active: u8,
     rounding: RoundingMode,
+    layout: Layout,
+) -> String {
+    match layout {
+        Layout::Comfortable => render_comfortable(input, git, incidents, total_active, rounding),
+        Layout::Condensed => render_condensed(input, git, incidents, total_active, rounding),
+    }
+}
+
+fn render_comfortable(
+    input: &Input,
+    git: Option<(String, bool)>,
+    incidents: &[Incident],
+    total_active: u8,
+    rounding: RoundingMode,
 ) -> String {
     let mut out = String::with_capacity(512);
 
@@ -96,6 +110,17 @@ pub fn render(
     }
 
     out
+}
+
+fn render_condensed(
+    _input: &Input,
+    _git: Option<(String, bool)>,
+    _incidents: &[Incident],
+    _total_active: u8,
+    _rounding: RoundingMode,
+) -> String {
+    // Implemented in Task 5.
+    String::new()
 }
 
 fn push_model_full(input: &Input, out: &mut String) {
@@ -272,7 +297,14 @@ mod tests {
     #[test]
     fn test_render_default_model() {
         let input = Input::default();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
         let plain = strip_ansi(&result);
         assert!(
             plain.contains("Claude"),
@@ -284,7 +316,14 @@ mod tests {
     fn test_render_model_name() {
         let json = r#"{"model": {"display_name": "claude-sonnet-4-5"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
         assert!(plain.contains("claude-sonnet-4-5"));
     }
 
@@ -297,7 +336,14 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
         assert!(plain.contains("50%"));
     }
 
@@ -310,6 +356,7 @@ mod tests {
             &[],
             0,
             RoundingMode::Floor,
+            Layout::Comfortable,
         ));
         assert!(plain.contains("(main)"));
     }
@@ -323,6 +370,7 @@ mod tests {
             &[],
             0,
             RoundingMode::Floor,
+            Layout::Comfortable,
         ));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
@@ -331,7 +379,14 @@ mod tests {
     fn test_render_dirname() {
         let json = r#"{"cwd": "/home/user/myproject"}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
         assert!(plain.contains("myproject"));
     }
 
@@ -344,7 +399,14 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
         assert!(
             result.contains('\n'),
             "should have newlines for rate limits"
@@ -368,7 +430,14 @@ mod tests {
             url: "https://status.claude.com/incidents/abc".to_string(),
         };
         let input = Input::default();
-        let out = render(&input, None, &[incident], 1, RoundingMode::Floor);
+        let out = render(
+            &input,
+            None,
+            &[incident],
+            1,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
         let plain = strip_ansi(&out);
         assert!(
             out.contains(fmt::ORANGE),
@@ -394,7 +463,14 @@ mod tests {
             url: "https://status.claude.com/incidents/a".to_string(),
         };
         // 1 stored, total=3 → "+2 more"
-        let out = render(&Input::default(), None, &[incident], 3, RoundingMode::Floor);
+        let out = render(
+            &Input::default(),
+            None,
+            &[incident],
+            3,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
     }
@@ -420,7 +496,14 @@ mod tests {
                 url: "https://status.claude.com/incidents/y".to_string(),
             },
         ];
-        let out = render(&Input::default(), None, &incidents, 2, RoundingMode::Floor);
+        let out = render(
+            &Input::default(),
+            None,
+            &incidents,
+            2,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("API down"));
         assert!(plain.contains("Elevated latency"));
@@ -431,7 +514,14 @@ mod tests {
 
     #[test]
     fn test_render_no_incident_unchanged_shape() {
-        let out = render(&Input::default(), None, &[], 0, RoundingMode::Floor);
+        let out = render(
+            &Input::default(),
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
         let plain = strip_ansi(&out);
         assert!(
             !plain.contains("·"),
@@ -465,7 +555,14 @@ mod tests {
     #[test]
     fn test_render_real_stdin_fixture() {
         let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor);
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
         assert!(
@@ -491,7 +588,14 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
         assert!(plain.contains("10%"));
         assert!(!plain.contains("100%"));
     }
@@ -506,9 +610,33 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor)).contains("50%"));
-        assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Ceiling)).contains("51%"));
-        assert!(strip_ansi(&render(&input, None, &[], 0, RoundingMode::Nearest)).contains("50%"));
+        assert!(strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable
+        ))
+        .contains("50%"));
+        assert!(strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Ceiling,
+            Layout::Comfortable
+        ))
+        .contains("51%"));
+        assert!(strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Nearest,
+            Layout::Comfortable
+        ))
+        .contains("50%"));
     }
 
     #[test]
@@ -534,7 +662,14 @@ mod tests {
             "session": {"start_time": "2024-01-15T10:30:00Z"}
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
         assert!(!plain.contains('⏱'), "stopwatch glyph should be gone");
     }
 }

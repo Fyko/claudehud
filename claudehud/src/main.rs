@@ -76,7 +76,14 @@ fn main() -> ExitCode {
     let (incidents, total_active) = incidents::read_incidents();
     print!(
         "{}",
-        render::render(&input, git, &incidents, total_active, rounding)
+        render::render(
+            &input,
+            git,
+            &incidents,
+            total_active,
+            rounding,
+            render::Layout::default()
+        )
     );
     ExitCode::SUCCESS
 }
