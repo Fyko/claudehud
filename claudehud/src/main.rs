@@ -57,6 +57,19 @@ fn main() -> ExitCode {
         }
     };
 
+    let layout = match std::env::var("CLAUDEHUD_LAYOUT") {
+        Ok(s) if !s.is_empty() => match render::Layout::parse(&s) {
+            Some(l) => l,
+            None => {
+                eprintln!(
+                    "claudehud: unknown CLAUDEHUD_LAYOUT '{s}' (want: comfortable|condensed)"
+                );
+                render::Layout::default()
+            }
+        },
+        _ => render::Layout::default(),
+    };
+
     let mut raw = String::new();
     io::stdin().read_to_string(&mut raw).unwrap_or(0);
     log_stdin(&raw);
@@ -76,14 +89,7 @@ fn main() -> ExitCode {
     let (incidents, total_active) = incidents::read_incidents();
     print!(
         "{}",
-        render::render(
-            &input,
-            git,
-            &incidents,
-            total_active,
-            rounding,
-            render::Layout::default()
-        )
+        render::render(&input, git, &incidents, total_active, rounding, layout)
     );
     ExitCode::SUCCESS
 }
