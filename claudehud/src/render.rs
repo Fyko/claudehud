@@ -6,7 +6,7 @@ use common::incidents::Incident;
 
 use crate::fmt::{self, *};
 use crate::input::Input;
-use crate::time::{format_duration, format_reset_time, parse_iso8601, ResetStyle};
+use crate::time::{format_duration, format_reset_time, ResetStyle};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RoundingMode {
@@ -101,17 +101,6 @@ pub fn render(
         }
         out.push_str(GREEN);
         out.push(')');
-        out.push_str(RESET);
-    }
-
-    // ── Session duration ───────────────────────────────────
-    if let Some(dur) = session_duration(input) {
-        out.push_str(SEP);
-        out.push_str(DIM);
-        out.push_str("⏱ ");
-        out.push_str(RESET);
-        out.push_str(WHITE);
-        out.push_str(&dur);
         out.push_str(RESET);
     }
 
@@ -216,13 +205,6 @@ fn context_pct(input: &Input, rounding: RoundingMode) -> u8 {
         })
         .unwrap_or(0);
     rounding.apply((current as f64 * 100.0) / size as f64)
-}
-
-fn session_duration(input: &Input) -> Option<String> {
-    let start = input.session.as_ref()?.start_time.as_deref()?;
-    let start_epoch = parse_iso8601(start)?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    Some(format_duration(now.saturating_sub(start_epoch)))
 }
 
 #[cfg(test)]
@@ -525,5 +507,16 @@ mod tests {
     #[test]
     fn test_layout_default_is_comfortable() {
         assert_eq!(Layout::default(), Layout::Comfortable);
+    }
+
+    #[test]
+    fn test_render_no_session_duration() {
+        // Build an Input with a session.start_time that would have produced "Xh Ym".
+        let json = r#"{
+            "session": {"start_time": "2024-01-15T10:30:00Z"}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(&input, None, &[], 0, RoundingMode::Floor));
+        assert!(!plain.contains('⏱'), "stopwatch glyph should be gone");
     }
 }
