@@ -63,61 +63,18 @@ pub fn render(
     let mut out = String::with_capacity(512);
 
     // ── Model ──────────────────────────────────────────────
-    let model = input
-        .model
-        .as_ref()
-        .and_then(|m| m.display_name.as_deref())
-        .unwrap_or("Claude");
-    out.push_str(BLUE);
-    out.push_str(model);
-    out.push_str(RESET);
+    push_model_full(input, &mut out);
 
     // ── Context usage ──────────────────────────────────────
     out.push_str(SEP);
-    let pct = context_pct(input, rounding);
-    out.push_str("✍️ ");
-    out.push_str(color_for_pct(pct));
-    write!(out, "{pct}%").unwrap();
-    out.push_str(RESET);
+    push_context(input, rounding, &mut out);
 
     // ── Dir + git ──────────────────────────────────────────
     out.push_str(SEP);
-    let cwd = input.cwd.as_deref().unwrap_or("");
-    let dirname = Path::new(cwd)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(cwd);
-    out.push_str(CYAN);
-    out.push_str(dirname);
-    out.push_str(RESET);
-    if let Some((branch, dirty)) = &git {
-        out.push(' ');
-        out.push_str(GREEN);
-        out.push('(');
-        out.push_str(branch);
-        if *dirty {
-            out.push_str(RED);
-            out.push('*');
-        }
-        out.push_str(GREEN);
-        out.push(')');
-        out.push_str(RESET);
-    }
+    push_dir_branch(input, git.as_ref(), false, &mut out);
 
     // ── Incident lines (between line 1 and rate limits) ────
-    for inc in incidents {
-        out.push('\n');
-        push_incident_line(inc, &mut out);
-    }
-    let overflow = total_active.saturating_sub(incidents.len() as u8);
-    if overflow > 0 {
-        out.push('\n');
-        write!(out, "\x1b]8;;https://status.claude.com/\x1b\\").unwrap();
-        out.push_str(DIM);
-        write!(out, "+{overflow} more").unwrap();
-        out.push_str(RESET);
-        out.push_str("\x1b]8;;\x1b\\");
-    }
+    push_incidents(incidents, total_active, &mut out);
 
     // ── Rate limits ────────────────────────────────────────
     if let Some(rl) = &input.rate_limits {
@@ -139,6 +96,67 @@ pub fn render(
     }
 
     out
+}
+
+fn push_model_full(input: &Input, out: &mut String) {
+    let model = input
+        .model
+        .as_ref()
+        .and_then(|m| m.display_name.as_deref())
+        .unwrap_or("Claude");
+    out.push_str(BLUE);
+    out.push_str(model);
+    out.push_str(RESET);
+}
+
+fn push_context(input: &Input, rounding: RoundingMode, out: &mut String) {
+    let pct = context_pct(input, rounding);
+    out.push_str("✍️ ");
+    out.push_str(color_for_pct(pct));
+    write!(out, "{pct}%").unwrap();
+    out.push_str(RESET);
+}
+
+fn push_dir_branch(input: &Input, git: Option<&(String, bool)>, tight: bool, out: &mut String) {
+    let cwd = input.cwd.as_deref().unwrap_or("");
+    let dirname = Path::new(cwd)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(cwd);
+    out.push_str(CYAN);
+    out.push_str(dirname);
+    out.push_str(RESET);
+    if let Some((branch, dirty)) = git {
+        if !tight {
+            out.push(' ');
+        }
+        out.push_str(GREEN);
+        out.push('(');
+        out.push_str(branch);
+        if *dirty {
+            out.push_str(RED);
+            out.push('*');
+        }
+        out.push_str(GREEN);
+        out.push(')');
+        out.push_str(RESET);
+    }
+}
+
+fn push_incidents(incidents: &[Incident], total_active: u8, out: &mut String) {
+    for inc in incidents {
+        out.push('\n');
+        push_incident_line(inc, out);
+    }
+    let overflow = total_active.saturating_sub(incidents.len() as u8);
+    if overflow > 0 {
+        out.push('\n');
+        write!(out, "\x1b]8;;https://status.claude.com/\x1b\\").unwrap();
+        out.push_str(DIM);
+        write!(out, "+{overflow} more").unwrap();
+        out.push_str(RESET);
+        out.push_str("\x1b]8;;\x1b\\");
+    }
 }
 
 fn push_incident_line(inc: &Incident, out: &mut String) {
