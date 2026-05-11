@@ -7,11 +7,15 @@ pub struct Input {
     pub cwd: Option<String>,
     pub session: Option<Session>,
     pub session_id: Option<String>,
+    pub session_name: Option<String>,
     pub transcript_path: Option<String>,
     pub version: Option<String>,
     pub workspace: Option<Workspace>,
     pub output_style: Option<OutputStyle>,
     pub cost: Option<Cost>,
+    pub effort: Option<Effort>,
+    pub thinking: Option<Thinking>,
+    pub fast_mode: Option<bool>,
     pub exceeds_200k_tokens: Option<bool>,
     pub rate_limits: Option<RateLimits>,
 }
@@ -67,6 +71,16 @@ pub struct Cost {
 }
 
 #[derive(Deserialize)]
+pub struct Effort {
+    pub level: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct Thinking {
+    pub enabled: Option<bool>,
+}
+
+#[derive(Deserialize)]
 pub struct RateLimits {
     pub five_hour: Option<RateWindow>,
     pub seven_day: Option<RateWindow>,
@@ -78,20 +92,23 @@ pub struct RateWindow {
     pub resets_at: Option<u64>,
 }
 
-/// Anonymized capture of a real Claude Code statusline stdin payload
-/// (harness v2.1.114). Keep in sync with upstream shape changes.
+/// Anonymized capture of a real Claude Code statusline stdin payload on a
+/// Claude plan (rate-limited tier) — harness v2.1.139. Keep in sync with
+/// upstream shape changes.
 #[cfg(test)]
 pub(crate) const REAL_STDIN_FIXTURE: &str = r#"{
         "session_id": "00000000-0000-0000-0000-000000000000",
         "transcript_path": "/tmp/transcripts/session.jsonl",
         "cwd": "/home/user/project",
+        "effort": {"level": "xhigh"},
+        "session_name": "Testing session setup",
         "model": {"id": "claude-opus-4-7", "display_name": "Opus 4.7"},
         "workspace": {
             "current_dir": "/home/user/project",
             "project_dir": "/home/user/project",
             "added_dirs": []
         },
-        "version": "2.1.114",
+        "version": "2.1.139",
         "output_style": {"name": "Gen-Z"},
         "cost": {
             "total_cost_usd": 0.75355175,
@@ -114,10 +131,53 @@ pub(crate) const REAL_STDIN_FIXTURE: &str = r#"{
             "remaining_percentage": 78
         },
         "exceeds_200k_tokens": false,
+        "fast_mode": false,
+        "thinking": {"enabled": true},
         "rate_limits": {
             "five_hour": {"used_percentage": 10, "resets_at": 1776567600},
             "seven_day": {"used_percentage": 22, "resets_at": 1776974400}
         }
+    }"#;
+
+/// Same shape as `REAL_STDIN_FIXTURE`, but on API billing — no `rate_limits`
+/// block, since API users pay per-token instead of against quota windows.
+#[cfg(test)]
+pub(crate) const API_BILLING_FIXTURE: &str = r#"{
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "/tmp/transcripts/session.jsonl",
+        "cwd": "/home/user/project",
+        "effort": {"level": "xhigh"},
+        "model": {"id": "claude-opus-4-7[1m]", "display_name": "Opus 4.7 (1M context)"},
+        "workspace": {
+            "current_dir": "/home/user/project",
+            "project_dir": "/home/user/project",
+            "added_dirs": []
+        },
+        "version": "2.1.139",
+        "output_style": {"name": "Gen-Z"},
+        "cost": {
+            "total_cost_usd": 0.1048615,
+            "total_duration_ms": 6044,
+            "total_api_duration_ms": 3372,
+            "total_lines_added": 0,
+            "total_lines_removed": 0
+        },
+        "context_window": {
+            "total_input_tokens": 32169,
+            "total_output_tokens": 18,
+            "context_window_size": 1000000,
+            "current_usage": {
+                "input_tokens": 6,
+                "output_tokens": 18,
+                "cache_creation_input_tokens": 15288,
+                "cache_read_input_tokens": 16875
+            },
+            "used_percentage": 3,
+            "remaining_percentage": 97
+        },
+        "exceeds_200k_tokens": false,
+        "fast_mode": false,
+        "thinking": {"enabled": true}
     }"#;
 
 #[cfg(test)]
@@ -140,7 +200,7 @@ mod tests {
             input.session_id.as_deref(),
             Some("00000000-0000-0000-0000-000000000000")
         );
-        assert_eq!(input.version.as_deref(), Some("2.1.114"));
+        assert_eq!(input.version.as_deref(), Some("2.1.139"));
         assert_eq!(input.cwd.as_deref(), Some("/home/user/project"));
         assert_eq!(input.exceeds_200k_tokens, Some(false));
 
@@ -178,6 +238,50 @@ mod tests {
         assert_eq!(
             rl.seven_day.as_ref().unwrap().resets_at,
             Some(1_776_974_400)
+        );
+
+        assert_eq!(input.session_name.as_deref(), Some("Testing session setup"));
+        assert_eq!(input.fast_mode, Some(false));
+        assert_eq!(
+            input.effort.as_ref().and_then(|e| e.level.as_deref()),
+            Some("xhigh")
+        );
+        assert_eq!(input.thinking.as_ref().and_then(|t| t.enabled), Some(true));
+    }
+
+    #[test]
+    fn test_deserialize_api_billing_fixture() {
+        let input: Input = serde_json::from_str(API_BILLING_FIXTURE).unwrap();
+
+        // Shared fields still parse correctly.
+        assert_eq!(input.version.as_deref(), Some("2.1.139"));
+        assert_eq!(
+            input.model.as_ref().and_then(|m| m.display_name.as_deref()),
+            Some("Opus 4.7 (1M context)")
+        );
+        assert!((input.cost.as_ref().unwrap().total_cost_usd.unwrap() - 0.104_861_5).abs() < 1e-9);
+
+        // Key marker of API billing: no rate_limits.
+        assert!(
+            input.rate_limits.is_none(),
+            "API billing payload should have no rate_limits"
+        );
+
+        // Newer fields still surface.
+        assert_eq!(
+            input.effort.as_ref().and_then(|e| e.level.as_deref()),
+            Some("xhigh")
+        );
+        assert_eq!(input.fast_mode, Some(false));
+        assert_eq!(input.thinking.as_ref().and_then(|t| t.enabled), Some(true));
+
+        // 1M context window from the [1m] model variant.
+        assert_eq!(
+            input
+                .context_window
+                .as_ref()
+                .and_then(|cw| cw.context_window_size),
+            Some(1_000_000)
         );
     }
 }

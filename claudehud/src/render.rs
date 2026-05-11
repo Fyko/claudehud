@@ -83,6 +83,9 @@ fn render_comfortable(
     out.push_str(SEP);
     push_context(input, rounding, &mut out);
 
+    // ── Cost (skipped when absent or $0) ───────────────────
+    push_cost(input, &mut out);
+
     // ── Dir + git ──────────────────────────────────────────
     out.push_str(SEP);
     push_dir_branch(input, git.as_ref(), false, &mut out);
@@ -127,6 +130,9 @@ fn render_condensed(
     // ── Context usage ──────────────────────────────────────
     out.push_str(SEP);
     push_context(input, rounding, &mut out);
+
+    // ── Cost (skipped when absent or $0) ───────────────────
+    push_cost(input, &mut out);
 
     // ── Dir + git (tight) ──────────────────────────────────
     out.push_str(SEP);
@@ -179,6 +185,20 @@ fn push_model_full(input: &Input, out: &mut String) {
         .unwrap_or("Claude");
     out.push_str(BLUE);
     out.push_str(model);
+    out.push_str(RESET);
+}
+
+fn push_cost(input: &Input, out: &mut String) {
+    let Some(usd) = input.cost.as_ref().and_then(|c| c.total_cost_usd) else {
+        return;
+    };
+    if !usd.is_finite() || usd <= 0.0 {
+        return;
+    }
+    out.push_str(SEP);
+    out.push_str("💰 ");
+    out.push_str(fmt::color_for_cost(usd));
+    write!(out, "${usd:.2}").unwrap();
     out.push_str(RESET);
 }
 
@@ -992,5 +1012,183 @@ mod tests {
             Layout::Comfortable,
         ));
         assert!(!plain.contains('⏱'), "stopwatch glyph should be gone");
+    }
+
+    // ── Cost rendering ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_cost_comfortable_present() {
+        let json = r#"{"cost": {"total_cost_usd": 0.1298}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(
+            plain.contains("$0.13"),
+            "cost should render with 2 decimals"
+        );
+        assert!(plain.contains("💰"), "cost glyph should render");
+    }
+
+    #[test]
+    fn test_render_cost_condensed_present() {
+        let json = r#"{"cost": {"total_cost_usd": 1.4567}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(plain.contains("$1.46"));
+        assert!(plain.contains("💰"));
+    }
+
+    #[test]
+    fn test_render_cost_skipped_when_zero() {
+        let json = r#"{"cost": {"total_cost_usd": 0}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(!plain.contains('$'), "zero cost should be hidden");
+        assert!(!plain.contains("💰"));
+    }
+
+    #[test]
+    fn test_render_cost_skipped_when_absent() {
+        let plain = strip_ansi(&render(
+            &Input::default(),
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(!plain.contains('$'));
+        assert!(!plain.contains("💰"));
+    }
+
+    #[test]
+    fn test_render_cost_color_tiers() {
+        // < $1 → green
+        let json = r#"{"cost": {"total_cost_usd": 0.5}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        assert!(out.contains(fmt::GREEN));
+
+        // $1 ≤ x < $5 → yellow
+        let json = r#"{"cost": {"total_cost_usd": 2.5}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        assert!(out.contains(fmt::YELLOW));
+
+        // $5 ≤ x < $20 → orange
+        let json = r#"{"cost": {"total_cost_usd": 12.0}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        assert!(out.contains(fmt::ORANGE));
+
+        // ≥ $20 → red
+        let json = r#"{"cost": {"total_cost_usd": 42.0}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        assert!(out.contains(fmt::RED));
+    }
+
+    #[test]
+    fn test_render_api_billing_fixture_comfortable() {
+        let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("Opus 4.7"), "model should render");
+        assert!(plain.contains("3%"), "context % should render");
+        assert!(plain.contains("$0.10"), "cost should render");
+        assert!(
+            !plain.contains("current"),
+            "no rate-limit row on API billing"
+        );
+        assert!(
+            !plain.contains("weekly"),
+            "no weekly rate-limit row on API billing"
+        );
+    }
+
+    #[test]
+    fn test_render_api_billing_fixture_condensed() {
+        let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
+        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("Opus 4.7"));
+        assert!(plain.contains("$0.10"));
+        assert!(!plain.contains("5h"), "no 5h inline on API billing");
+        assert!(!plain.contains("7d"), "no 7d inline on API billing");
+        assert!(!out.contains('\n'), "single-line output");
+    }
+
+    #[test]
+    fn test_render_cost_condensed_single_line() {
+        let json = r#"{
+            "cost": {"total_cost_usd": 0.42},
+            "rate_limits": {
+                "five_hour": {"used_percentage": 9.0, "resets_at": 1705316400}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        assert!(
+            !out.contains('\n'),
+            "condensed layout must stay single-line"
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("$0.42"));
+        assert!(plain.contains("5h"));
     }
 }

@@ -21,6 +21,18 @@ pub fn color_for_pct(pct: u8) -> &'static str {
     }
 }
 
+pub fn color_for_cost(usd: f64) -> &'static str {
+    if usd >= 20.0 {
+        RED
+    } else if usd >= 5.0 {
+        ORANGE
+    } else if usd >= 1.0 {
+        YELLOW
+    } else {
+        GREEN
+    }
+}
+
 use common::incidents::Severity;
 
 pub fn color_for_severity(sev: Severity) -> &'static str {
@@ -87,6 +99,18 @@ mod tests {
         build_bar(0, 10, &mut s);
         let plain: String = s.chars().filter(|&c| c == '●' || c == '○').collect();
         assert_eq!(plain, "○○○○○○○○○○");
+    }
+
+    #[test]
+    fn test_color_for_cost() {
+        assert_eq!(color_for_cost(0.0), GREEN);
+        assert_eq!(color_for_cost(0.99), GREEN);
+        assert_eq!(color_for_cost(1.0), YELLOW);
+        assert_eq!(color_for_cost(4.99), YELLOW);
+        assert_eq!(color_for_cost(5.0), ORANGE);
+        assert_eq!(color_for_cost(19.99), ORANGE);
+        assert_eq!(color_for_cost(20.0), RED);
+        assert_eq!(color_for_cost(1000.0), RED);
     }
 
     #[test]
