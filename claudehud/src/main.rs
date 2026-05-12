@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use claudehud::render::RoundingMode;
-use claudehud::{git, incidents, input, install, render, update};
+use claudehud::{doctor, git, incidents, input, install, render, update};
 
 const HELP: &str = "\
 claudehud — statusline renderer for Claude Code
@@ -16,6 +16,8 @@ USAGE:
                                  as its statusLine. See `claudehud install -h`.
   claudehud update [OPTIONS]     Upgrade to the latest release (or check with
                                  --check). See `claudehud update -h`.
+  claudehud doctor [OPTIONS]     Run health checks on the daemon + cache.
+                                 See `claudehud doctor -h`.
 
 OPTIONS (for `render`):
   --usage-rounding-mode <MODE>   How to round usage percentages.
@@ -43,6 +45,7 @@ fn main() -> ExitCode {
     let mut args = pico_args::Arguments::from_env();
 
     match args.subcommand().ok().flatten().as_deref() {
+        Some("doctor") => return doctor::run(args),
         Some("install") => return install::run(args),
         Some("update") => return update::run(args),
         Some("render") => return render(args),
