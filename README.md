@@ -108,7 +108,7 @@ CLAUDEHUD_LAYOUT=condensed
 Comfortable renders the HUD across multiple lines with full bars and a blank gap before rate limits:
 
 ```
-Opus 4.7 (1M context) │ ✍️ 4% │ 💰 $0.13 │ claudehud (main*)
+Opus 4.7 (1M context) │ ✍️ 4% │ claudehud (main*)
 
 current ○○○○○○○○○○   9% ⟳ 10:50am
 weekly  ●○○○○○○○○○  12% ⟳ apr 25, 7:00pm
@@ -117,10 +117,16 @@ weekly  ●○○○○○○○○○  12% ⟳ apr 25, 7:00pm
 Condensed collapses everything onto a single line, with shorter rate-limit bars (4 dots) inline:
 
 ```
-Opus 4.7 │ ✍️ 4% │ 💰 $0.13 │ claudehud(main*) │ ○○○○ 5h 9% ⟳ 10:50am │ ○○○○ 7d 12% ⟳ apr 25, 7:00pm
+Opus 4.7 │ ✍️ 4% │ claudehud(main*) │ ○○○○ 5h 9% ⟳ 10:50am │ ○○○○ 7d 12% ⟳ apr 25, 7:00pm
 ```
 
-The 💰 segment shows the harness-reported session cost (`cost.total_cost_usd`). It's hidden when the field is missing or `$0` (so it stays off until the first round-trip with cost data — e.g. session-start hooks). Tiered color: green &lt; $1, yellow &lt; $5, orange &lt; $20, red ≥ $20. On API billing, rate-limit rows are omitted (the harness only emits them on plan tiers).
+On API billing (no `rate_limits` block from the harness), a 💰 segment with `cost.total_cost_usd` replaces the rate-limit rows:
+
+```
+Opus 4.7 (1M context) │ ✍️ 3% │ 💰 $0.13 │ claudehud (main*)
+```
+
+The segment is hidden when the field is missing or `$0`, and also hidden whenever `rate_limits` is present — plan users see an estimated cost from the harness, not actual spend, so showing it would be misleading. Tiered color: green &lt; $1, yellow &lt; $5, orange &lt; $20, red ≥ $20.
 
 Active incidents still render on their own line below row 1 in both layouts.
 

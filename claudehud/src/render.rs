@@ -189,6 +189,13 @@ fn push_model_full(input: &Input, out: &mut String) {
 }
 
 fn push_cost(input: &Input, out: &mut String) {
+    // The harness reports total_cost_usd on plan billing too, but it's an
+    // estimate against pay-per-token rates — not what the user actually owes.
+    // Presence of rate_limits is our cleanest plan-vs-API signal: API users
+    // never get a rate_limits block.
+    if input.rate_limits.is_some() {
+        return;
+    }
     let Some(usd) = input.cost.as_ref().and_then(|c| c.total_cost_usd) else {
         return;
     };
@@ -1175,12 +1182,7 @@ mod tests {
 
     #[test]
     fn test_render_cost_condensed_single_line() {
-        let json = r#"{
-            "cost": {"total_cost_usd": 0.42},
-            "rate_limits": {
-                "five_hour": {"used_percentage": 9.0, "resets_at": 1705316400}
-            }
-        }"#;
+        let json = r#"{"cost": {"total_cost_usd": 0.42}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
         let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
         assert!(
@@ -1189,6 +1191,49 @@ mod tests {
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("$0.42"));
-        assert!(plain.contains("5h"));
+    }
+
+    #[test]
+    fn test_render_cost_hidden_when_rate_limits_present() {
+        // Presence of rate_limits → plan billing → cost is an estimate, not
+        // actual spend, so we hide it. Cost is otherwise non-zero here.
+        let json = r#"{
+            "cost": {"total_cost_usd": 3.14},
+            "rate_limits": {
+                "five_hour": {"used_percentage": 9.0, "resets_at": 1705316400}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+
+        let comfortable = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(
+            !comfortable.contains("$3.14"),
+            "cost must not render on plan billing (comfortable)"
+        );
+        assert!(!comfortable.contains("💰"));
+        // Plan-side fields still render.
+        assert!(comfortable.contains("current"));
+
+        let condensed = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(
+            !condensed.contains("$3.14"),
+            "cost must not render on plan billing (condensed)"
+        );
+        assert!(!condensed.contains("💰"));
+        assert!(condensed.contains("5h"));
     }
 }
