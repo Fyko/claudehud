@@ -7,6 +7,7 @@
 
 mod cache;
 mod registrar;
+mod segments;
 mod status;
 mod watcher;
 
@@ -57,6 +58,10 @@ fn main() -> ExitCode {
 
     std::thread::spawn(|| {
         status::start();
+    });
+
+    std::thread::spawn(|| {
+        segments::start();
     });
 
     // watcher::start runs the main event loop — blocks until channel closes
