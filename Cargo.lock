@@ -64,6 +64,7 @@ dependencies = [
  "memmap2",
  "notify",
  "roxmltree",
+ "tempfile",
  "ureq",
 ]
 
