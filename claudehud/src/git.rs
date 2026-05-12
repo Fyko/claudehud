@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::Path;
 
 use common::{
-    hash_path, mmap_path, read_git_status, seqlock_read, watch_path, MMAP_SIZE, WATCH_DIR,
+    hash_path, mmap_path, read_git_status, seqlock_read, watch_dir, watch_path, MMAP_SIZE,
 };
 use memmap2::Mmap;
 
@@ -41,7 +41,7 @@ fn try_mmap_read(hash: u32) -> Option<(String, bool)> {
 }
 
 fn register(cwd: &Path, hash: u32) {
-    let _ = fs::create_dir_all(WATCH_DIR);
+    let _ = fs::create_dir_all(watch_dir());
     if let Ok(mut f) = fs::File::create(watch_path(hash)) {
         let _ = f.write_all(cwd.as_os_str().as_encoded_bytes());
     }
