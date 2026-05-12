@@ -1,0 +1,104 @@
+name: Test Installer (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to install (blank = latest)"
+        required: false
+        default: ""
+  push:
+    paths:
+      - "install.ps1"
+      - ".github/workflows/test-installer-windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install + verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run installer
+        shell: pwsh
+        env:
+          CLAUDEHUD_VERSION: ${{ inputs.version }}
+        run: ./install.ps1
+
+      - name: Verify binaries on PATH (refreshed)
+        shell: pwsh
+        run: |
+          $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+          $env:PATH = "$env:PATH;$userPath"
+          Write-Host "claudehud --version:"
+          claudehud --version
+          if ($LASTEXITCODE -ne 0) { throw "claudehud --version failed ($LASTEXITCODE)" }
+          Write-Host "claudehud-daemon --version:"
+          claudehud-daemon --version
+          if ($LASTEXITCODE -ne 0) { throw "claudehud-daemon --version failed ($LASTEXITCODE)" }
+
+      - name: Verify install directory contents
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\claudehud'
+          if (-not (Test-Path (Join-Path $dir 'claudehud.exe'))) {
+            throw "claudehud.exe missing from $dir"
+          }
+          if (-not (Test-Path (Join-Path $dir 'claudehud-daemon.exe'))) {
+            throw "claudehud-daemon.exe missing from $dir"
+          }
+          Get-ChildItem $dir | Format-Table -AutoSize
+
+      - name: Verify user PATH was updated
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\claudehud'
+          $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+          if (-not ($userPath -split ';' | Where-Object { $_ -eq $dir })) {
+            throw "user PATH does not contain $dir`nuser PATH: $userPath"
+          }
+          Write-Host "ok: user PATH contains $dir"
+
+      - name: Verify scheduled task is registered
+        shell: pwsh
+        run: |
+          $task = Get-ScheduledTask -TaskName 'claudehud-daemon' -ErrorAction Stop
+          $task | Format-List TaskName, State, Triggers
+          if ($task.State -eq 'Disabled') { throw 'claudehud-daemon task is disabled' }
+
+      - name: Re-run installer (idempotency check)
+        shell: pwsh
+        env:
+          CLAUDEHUD_VERSION: ${{ inputs.version }}
+        run: |
+          $log = ./install.ps1 2>&1 | Out-String
+          Write-Host $log
+          if ($log -notmatch 'already up to date') {
+            throw 'expected idempotent short-circuit ("already up to date") on re-run'
+          }
+
+  install-skip-daemon:
+    name: Install with CLAUDEHUD_SKIP_DAEMON
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run installer with daemon skipped
+        shell: pwsh
+        env:
+          CLAUDEHUD_VERSION: ${{ inputs.version }}
+          CLAUDEHUD_SKIP_DAEMON: "1"
+          CLAUDEHUD_SKIP_CONFIG: "1"
+        run: ./install.ps1
+
+      - name: Verify no scheduled task was created
+        shell: pwsh
+        run: |
+          $task = Get-ScheduledTask -TaskName 'claudehud-daemon' -ErrorAction SilentlyContinue
+          if ($null -ne $task) {
+            throw 'claudehud-daemon task should not exist when CLAUDEHUD_SKIP_DAEMON=1'
+          }
+          Write-Host 'ok: no scheduled task registered'
