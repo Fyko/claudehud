@@ -24,6 +24,19 @@ OPTIONS (for `render`):
 GLOBAL OPTIONS:
   -V, --version                  Print version and exit
   -h, --help                     Print this help
+
+ENVIRONMENT:
+  CLAUDEHUD_LAYOUT               Render layout: comfortable (default) or condensed.
+  CLAUDEHUD_LOG                  Path; appends each stdin JSON payload here for
+                                 debugging the render path.
+  CLAUDEHUD_CACHE_DIR            Override the cache directory holding mmap files
+                                 + watch markers. Default: /tmp on Unix,
+                                 %LOCALAPPDATA%\\claudehud\\cache on Windows.
+  CLAUDE_CONFIG_DIR              Alternate Claude config directory used by
+                                 `claudehud install` when resolving settings.json.
+
+  `claudehud update` forwards additional env vars to the install script —
+  see `claudehud update -h`.
 ";
 
 fn main() -> ExitCode {
