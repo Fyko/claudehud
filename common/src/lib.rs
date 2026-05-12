@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::atomic::{fence, Ordering};
 
 pub mod incidents;
+pub mod segments;
 
 pub const MMAP_SIZE: usize = 138;
 pub const BRANCH_MAX: usize = 128;
