@@ -9,6 +9,8 @@ edition = "2021"
 [workspace.dependencies]
 common = { path = "common" }
 memmap2 = "0.9"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 [profile.release]
 opt-level = 3
