@@ -120,7 +120,8 @@ This avoids forcing users to edit launchd plists / systemd unit
 
 ### `claudehud/src/main.rs` — drop-on-render
 
-After `render::render` returns and before `print!`, the client checks
+In the `render` function, after the statusline has been printed to stdout
+(so the drop never delays the rendered output), the client checks
 `std::env::var_os("CLAUDEHUD_USAGE")`. When set to any non-empty value:
 
 ```rust
@@ -149,13 +150,18 @@ the cli.
 Subcommands (all read-only):
 
 ```
+claudehud usage                                             prints `usage today` output
 claudehud usage today                                       summary for today
 claudehud usage week                                        summary for last 7d
 claudehud usage sessions [--limit N] [--project PATH]
                          [--since YYYY-MM-DD] [--json]      list recent sessions
 claudehud usage projects [--since YYYY-MM-DD] [--limit N]   top projects by spend
 claudehud usage db                                          print path to usage.db
+claudehud usage --help                                      print subcommand help and exit
 ```
+
+Bare `claudehud usage` (no sub-subcommand) prints the same output as
+`claudehud usage today` — the highest-signal default.
 
 Default output is a compact human-readable table; `--json` switches to
 newline-delimited JSON for piping.
