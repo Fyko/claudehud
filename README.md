@@ -3,7 +3,13 @@
 ![example.png](docs/example.png)
 
 ```bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/fyko/claudehud/main/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/fyko/claudehud/main/install.ps1 | iex
 ```
 
 A Rust rewrite of my personal Claude Code statusline bash script. Renders in ~2.6ms instead of ~437ms by replacing bash interpreter startup + multiple `jq`/`git` subprocess calls with a compiled binary and an mmap-backed git status daemon.
@@ -48,6 +54,8 @@ Instead of spawning `git` on every render, the daemon holds per-repo status in m
 
 **Registration:** on first render for a new directory, the client writes a marker file to `/tmp/clhud-watch/{hash}` containing the absolute path. The daemon watches that directory via FSEvents (macOS) / inotify (Linux) and picks it up.
 
+On Windows, cache files live under `%LOCALAPPDATA%\claudehud\cache\` instead of `/tmp/`. The filename pattern (`clhud-{hash}.bin`) is identical.
+
 **Client read path:**
 1. Hash the cwd with FNV-1a 32-bit
 2. Try `open("/tmp/clhud-{hash}.bin")` + mmap
@@ -88,6 +96,8 @@ cargo build --release
 ```
 
 Binaries land at `target/release/claudehud` and `target/release/claudehud-daemon`.
+
+On Windows, builds use the MSVC toolchain. The daemon's `windows_subsystem = "windows"` cfg only applies in `--release` mode — debug builds keep the console window so developers can see stdout/stderr.
 
 ```bash
 # install
@@ -208,6 +218,22 @@ WantedBy=default.target
 
 ```bash
 systemctl --user enable --now claudehud-daemon
+```
+
+### Daemon (Windows Task Scheduler)
+
+`install.ps1` registers a per-user Task Scheduler entry named `claudehud-daemon` that runs at logon, hidden, with no admin required. The action invokes `%LOCALAPPDATA%\Programs\claudehud\claudehud-daemon.exe` and Task Scheduler restarts the daemon up to 3 times if it crashes.
+
+Inspect or modify the registration:
+
+```powershell
+schtasks /Query /TN claudehud-daemon /XML
+```
+
+Uninstall:
+
+```powershell
+schtasks /Delete /TN claudehud-daemon /F
 ```
 
 ## Dependencies
