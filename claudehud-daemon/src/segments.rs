@@ -74,7 +74,7 @@ pub fn run_segment(cfg: &SegmentConfig) -> Option<String> {
         return None;
     }
 
-    let mut child = Command::new(parts[0])
+    let child = Command::new(parts[0])
         .args(&parts[1..])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
