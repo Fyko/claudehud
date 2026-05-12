@@ -28,6 +28,47 @@ The daemon polls `https://status.claude.com/history.atom` every 5 minutes using 
 
 The daemon stores the current representative incident at `/tmp/clhud-incidents.bin` (408 bytes, seqlock-protected). If the daemon isn't running, the line simply doesn't appear — this degrades silently, like the git cache.
 
+## Pipe-extension segments
+
+Declare arbitrary shell commands in `~/.config/claudehud/config.toml` (macOS/Linux) or `%APPDATA%\claudehud\config.toml` (Windows). The daemon runs each command on its interval and caches the output; the client reads from cache on every render with no subprocess overhead.
+
+```toml
+[[segment]]
+name     = "kube-ctx"
+cmd      = "kubectl config current-context"
+interval = "30s"
+position = "after-branch"
+
+[[segment]]
+name     = "aws-profile"
+cmd      = "aws configure get profile"
+interval = "60s"
+position = "end-line-1"
+max_bytes     = 32    # default 64, max 128
+timeout       = "2s"  # kill if command exceeds this; default 5s
+show_on_error = false # show stderr on nonzero exit? default false
+```
+
+### Positions
+
+| `position` value | Comfortable layout | Condensed layout |
+|------------------|--------------------|------------------|
+| `before-model` | before model name, line 1 | before model name |
+| `after-branch` | after dir/branch, line 1 | after dir/branch |
+| `end-line-1` | end of line 1 | end of line 1 |
+| `before-rate` | before rate-limit bars | **omitted** |
+| `line-2` | second newline block | **omitted** |
+| `end-line-2` | end of second newline block | **omitted** |
+
+### Security
+
+> **Warning:** pipe-extension commands run with the daemon's privileges and inherit its environment. Only put trusted commands in your config file.
+
+- Commands are split on whitespace and passed directly as `argv` — **not** through a shell. To use shell features (pipes, redirects, variable expansion), write `bash -c '...'` or `sh -c '...'` explicitly.
+- On Unix, the daemon refuses to load a config file that is world-writable (`mode & 0o002 != 0`). A warning is printed to stderr and no segments run.
+- Command output is truncated to `max_bytes` bytes on a UTF-8 character boundary. ANSI escape sequences are stripped before display.
+- Hot-reload: the daemon watches the config directory for changes and restarts schedulers automatically. **Known limitation:** on some platforms, atomically-renamed files (most editors) may take up to one extra second to pick up.
+
 ## Architecture
 
 Two binaries in a Cargo workspace:
@@ -241,11 +282,11 @@ schtasks /Delete /TN claudehud-daemon /F
 | Crate | Used by | Purpose |
 |-------|---------|---------|
 | `memmap2` | client + daemon | memory-mapped file I/O |
-| `serde` + `serde_json` | client | deserialize Claude Code JSON payload |
+| `serde` + `serde_json` | client + daemon + common | JSON + TOML deserialization |
+| `toml` | client + daemon + common | parse `config.toml` for pipe-extension segments |
 | `time` | client | local timezone formatting |
 | `notify` | daemon | FSEvents/inotify filesystem watching |
 | `crossbeam-channel` | daemon | multi-producer channel between registrar and watcher threads |
 | `ureq` | daemon | HTTPS client for status.claude.com |
 | `roxmltree` | daemon | Atom feed parser |
-
-`common` has no external dependencies.
+| `libc` | daemon (Unix) | SIGKILL for segment command timeout enforcement |
