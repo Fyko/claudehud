@@ -6,7 +6,48 @@ pub mod incidents;
 
 pub const MMAP_SIZE: usize = 138;
 pub const BRANCH_MAX: usize = 128;
-pub const WATCH_DIR: &str = "/tmp/clhud-watch";
+
+/// Runtime cache directory. Honored env override: `CLAUDEHUD_CACHE_DIR`.
+/// Unix default: `/tmp`. Windows default: `%LOCALAPPDATA%\claudehud\cache`.
+pub fn cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("CLAUDEHUD_CACHE_DIR") {
+        return PathBuf::from(dir);
+    }
+    #[cfg(windows)]
+    {
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Users\Default\AppData\Local"));
+        local.join("claudehud").join("cache")
+    }
+    #[cfg(unix)]
+    {
+        PathBuf::from("/tmp")
+    }
+}
+
+/// Directory under `cache_dir()` where the daemon watches for client registration markers.
+pub fn watch_dir() -> PathBuf {
+    cache_dir().join("clhud-watch")
+}
+
+pub fn mmap_path(hash: u32) -> PathBuf {
+    mmap_path_in(&cache_dir(), hash)
+}
+
+pub fn watch_path(hash: u32) -> PathBuf {
+    watch_path_in(&cache_dir(), hash)
+}
+
+/// Test seam: build mmap path under an explicit root.
+pub fn mmap_path_in(root: &Path, hash: u32) -> PathBuf {
+    root.join(format!("clhud-{hash}.bin"))
+}
+
+/// Test seam: build watch marker path under an explicit root.
+pub fn watch_path_in(root: &Path, hash: u32) -> PathBuf {
+    root.join("clhud-watch").join(hash.to_string())
+}
 
 // Layout:
 // [0..8]   u64 seqlock counter (even=stable, odd=write in progress)
@@ -23,14 +64,6 @@ pub fn hash_path(path: &Path) -> u32 {
         hash = hash.wrapping_mul(16_777_619);
     }
     hash
-}
-
-pub fn mmap_path(hash: u32) -> PathBuf {
-    PathBuf::from(format!("/tmp/clhud-{hash}.bin"))
-}
-
-pub fn watch_path(hash: u32) -> PathBuf {
-    PathBuf::from(format!("/tmp/clhud-watch/{hash}"))
 }
 
 /// Seqlock read: spin until we get a consistent even-seq snapshot.
@@ -113,15 +146,31 @@ mod tests {
     }
 
     #[test]
-    fn test_mmap_path_format() {
-        let p = mmap_path(12345);
-        assert_eq!(p.to_str().unwrap(), "/tmp/clhud-12345.bin");
+    fn test_mmap_path_in_format() {
+        let p = mmap_path_in(Path::new("/tmp"), 12345);
+        assert_eq!(p, Path::new("/tmp/clhud-12345.bin"));
     }
 
     #[test]
-    fn test_watch_path_format() {
-        let p = watch_path(12345);
-        assert_eq!(p.to_str().unwrap(), "/tmp/clhud-watch/12345");
+    fn test_watch_path_in_format() {
+        let p = watch_path_in(Path::new("/tmp"), 12345);
+        assert_eq!(p, Path::new("/tmp/clhud-watch/12345"));
+    }
+
+    #[test]
+    fn test_cache_dir_respects_env_override() {
+        // SAFETY: this test mutates process env; serial with other env-mutating tests.
+        // We isolate via a tempdir-style path that won't collide with real cache.
+        let key = "CLAUDEHUD_CACHE_DIR";
+        let prev = std::env::var_os(key);
+        std::env::set_var(key, "/tmp/claudehud-test-override");
+        let got = cache_dir();
+        if let Some(p) = prev {
+            std::env::set_var(key, p);
+        } else {
+            std::env::remove_var(key);
+        }
+        assert_eq!(got, Path::new("/tmp/claudehud-test-override"));
     }
 
     #[test]
