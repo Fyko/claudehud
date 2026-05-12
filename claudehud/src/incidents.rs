@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use common::incidents::{
-    incidents_path, seqlock_read_incidents, Incident, INCIDENTS_MMAP_SIZE,
-};
+use common::incidents::{incidents_path, seqlock_read_incidents, Incident, INCIDENTS_MMAP_SIZE};
 use memmap2::Mmap;
 
 /// Returns (stored_incidents, total_active_count).
