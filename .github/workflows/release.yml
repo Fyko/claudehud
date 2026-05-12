@@ -59,6 +59,7 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Build
+        shell: bash
         run: |
           cargo build --release --locked --target ${{ matrix.target }} \
             -p claudehud -p claudehud-daemon
