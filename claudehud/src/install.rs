@@ -63,8 +63,15 @@ pub fn run(mut args: Arguments) -> ExitCode {
         }
     };
 
+    // statusLine command in settings.json is parsed as a shell command. Quote
+    // the binary path so installs under directories containing spaces (e.g.
+    // %LOCALAPPDATA% beneath a profile name with whitespace on Windows) don't
+    // get tokenized. Append `render` so the binary takes the explicit subcommand
+    // path — interactive `claudehud` with a TTY stdin prints help instead of
+    // hanging on read_to_string, but Claude Code's piped invocation still works
+    // for legacy settings wired to the bare path.
     let command = match std::env::current_exe() {
-        Ok(p) => p.display().to_string(),
+        Ok(p) => format!("\"{}\" render", p.display()),
         Err(e) => {
             eprintln!("claudehud install: cannot determine own path: {e}");
             return ExitCode::from(1);

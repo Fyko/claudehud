@@ -1,4 +1,4 @@
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -6,24 +6,37 @@ use claudehud::render::RoundingMode;
 use claudehud::{git, incidents, input, install, render, update};
 
 const HELP: &str = "\
-claudehud
+claudehud — statusline renderer for Claude Code
 
 USAGE:
-  claudehud [OPTIONS]
-  claudehud install [OPTIONS]
-  claudehud update [OPTIONS]
+  claudehud render [OPTIONS]     Read JSON from stdin, write the statusline.
+                                 Invoked by Claude Code; bare `claudehud` with
+                                 piped stdin still routes here for back-compat.
+  claudehud install [OPTIONS]    Configure Claude Code to use this binary
+                                 as its statusLine. See `claudehud install -h`.
+  claudehud update [OPTIONS]     Upgrade to the latest release (or check with
+                                 --check). See `claudehud update -h`.
 
-OPTIONS:
+OPTIONS (for `render`):
   --usage-rounding-mode <MODE>   How to round usage percentages.
                                  Values: floor (default), ceiling, nearest
+
+GLOBAL OPTIONS:
   -V, --version                  Print version and exit
   -h, --help                     Print this help
 
-SUBCOMMANDS:
-  install                        Configure Claude Code to use this binary
-                                 as its statusLine. See `claudehud install -h`.
-  update                         Upgrade to the latest release (or check with
-                                 --check). See `claudehud update -h`.
+ENVIRONMENT:
+  CLAUDEHUD_LAYOUT               Render layout: comfortable (default) or condensed.
+  CLAUDEHUD_LOG                  Path; appends each stdin JSON payload here for
+                                 debugging the render path.
+  CLAUDEHUD_CACHE_DIR            Override the cache directory holding mmap files
+                                 + watch markers. Default: /tmp on Unix,
+                                 %LOCALAPPDATA%\\claudehud\\cache on Windows.
+  CLAUDE_CONFIG_DIR              Alternate Claude config directory used by
+                                 `claudehud install` when resolving settings.json.
+
+  `claudehud update` forwards additional env vars to the install script —
+  see `claudehud update -h`.
 ";
 
 fn main() -> ExitCode {
@@ -32,7 +45,13 @@ fn main() -> ExitCode {
     match args.subcommand().ok().flatten().as_deref() {
         Some("install") => return install::run(args),
         Some("update") => return update::run(args),
-        _ => {}
+        Some("render") => return render(args),
+        Some(other) => {
+            eprintln!("claudehud: unknown subcommand '{other}'");
+            eprintln!("run `claudehud --help` for available subcommands");
+            return ExitCode::from(2);
+        }
+        None => {}
     }
 
     if args.contains(["-h", "--help"]) {
@@ -42,6 +61,25 @@ fn main() -> ExitCode {
 
     if args.contains(["-V", "--version"]) {
         println!("claudehud {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
+
+    // Bare `claudehud` with no subcommand. If stdin is a TTY the user ran us
+    // from a shell — probably looking for help, not piping a JSON payload
+    // (which would deadlock on read_to_string). Print help and exit.
+    // If stdin is piped (Claude Code's statusLine), fall through to render
+    // so legacy settings.json wired to bare `claudehud` keeps working.
+    if io::stdin().is_terminal() {
+        print!("{HELP}");
+        return ExitCode::SUCCESS;
+    }
+
+    render(args)
+}
+
+fn render(mut args: pico_args::Arguments) -> ExitCode {
+    if args.contains(["-h", "--help"]) {
+        print!("{HELP}");
         return ExitCode::SUCCESS;
     }
 

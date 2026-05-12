@@ -164,7 +164,7 @@ Or set it by hand:
 ```json
 {
   "statusLine": {
-    "command": "$HOME/.local/bin/claudehud"
+    "command": "\"$HOME/.local/bin/claudehud\" render"
   }
 }
 ```
