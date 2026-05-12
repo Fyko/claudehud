@@ -74,7 +74,7 @@ jobs:
         env:
           CLAUDEHUD_VERSION: ${{ inputs.version }}
         run: |
-          $log = ./install.ps1 2>&1 | Out-String
+          $log = ./install.ps1 *>&1 | Out-String
           Write-Host $log
           if ($log -notmatch 'already up to date') {
             throw 'expected idempotent short-circuit ("already up to date") on re-run'
