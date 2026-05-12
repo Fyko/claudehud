@@ -183,15 +183,17 @@ if (-not $env:CLAUDEHUD_SKIP_CONFIG) {
 # ---------------------------------------------------------------------------
 
 function Register-ClaudehudDaemon {
+    # Use the user's SID throughout. $env:USERNAME is only the short name on
+    # domain-joined machines (e.g. "carter" not "CORP\carter"), which can fail
+    # or match the wrong principal. SIDs are unambiguous in both environments.
     $sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
-    $user = $env:USERNAME
     $xml = @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
-      <UserId>$user</UserId>
+      <UserId>$sid</UserId>
     </LogonTrigger>
   </Triggers>
   <Principals>
@@ -223,7 +225,7 @@ function Register-ClaudehudDaemon {
 </Task>
 "@
     try {
-        Register-ScheduledTask -Xml $xml -TaskName 'claudehud-daemon' -User $user -Force | Out-Null
+        Register-ScheduledTask -Xml $xml -TaskName 'claudehud-daemon' -User $sid -Force | Out-Null
         Start-ScheduledTask -TaskName 'claudehud-daemon' -ErrorAction SilentlyContinue
         Say 'daemon registered + started via Task Scheduler (claudehud-daemon)'
     } catch {

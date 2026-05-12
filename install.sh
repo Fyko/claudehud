@@ -233,14 +233,14 @@ main() {
     # start_daemon so users who ran with CLAUDEHUD_SKIP_CONFIG the first time
     # can pick up statusline config on a later run. set CLAUDEHUD_FORCE_INSTALL
     # to bypass.
+    skip_download=""
     if [ -z "${CLAUDEHUD_FORCE_INSTALL:-}" ] && [ -x "$INSTALL_DIR/claudehud" ]; then
         installed_ver="$("$INSTALL_DIR/claudehud" --version 2>/dev/null | awk '{print $2}')"
         if [ -n "$installed_ver" ] && [ "$installed_ver" = "$tag_ver" ]; then
             say "claudehud $installed_ver is already up to date"
             say "(set CLAUDEHUD_FORCE_INSTALL=1 to reinstall)"
-            return 0
-        fi
-        if [ -n "$installed_ver" ]; then
+            skip_download=1
+        elif [ -n "$installed_ver" ]; then
             say "upgrading claudehud $installed_ver → $tag_ver"
         else
             say "installing claudehud $tag"
@@ -255,22 +255,24 @@ main() {
     # ensure install dir exists and is in PATH
     mkdir -p "$INSTALL_DIR"
 
-    tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' EXIT
+    if [ -z "$skip_download" ]; then
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
 
-    base_url="https://github.com/${REPO}/releases/download/${tag}"
+        base_url="https://github.com/${REPO}/releases/download/${tag}"
 
-    for bin in claudehud claudehud-daemon; do
-        url="${base_url}/${bin}-${target}"
-        dest="${tmpdir}/${bin}"
-        say "downloading $bin..."
-        download "$url" "$dest"
-        verify_sha256 "$dest" "$url"
-        chmod +x "$dest"
-        mv "$dest" "${INSTALL_DIR}/${bin}"
-    done
+        for bin in claudehud claudehud-daemon; do
+            url="${base_url}/${bin}-${target}"
+            dest="${tmpdir}/${bin}"
+            say "downloading $bin..."
+            download "$url" "$dest"
+            verify_sha256 "$dest" "$url"
+            chmod +x "$dest"
+            mv "$dest" "${INSTALL_DIR}/${bin}"
+        done
 
-    say "installed to $INSTALL_DIR"
+        say "installed to $INSTALL_DIR"
+    fi
 
     configure_claude
 
