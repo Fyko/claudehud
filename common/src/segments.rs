@@ -174,10 +174,7 @@ pub fn parse_config(toml_text: &str) -> Result<Vec<SegmentConfig>, String> {
         let timeout = seg
             .timeout
             .as_deref()
-            .map(|s| {
-                parse_duration(s)
-                    .ok_or_else(|| format!("segment[{i}] invalid timeout {s:?}"))
-            })
+            .map(|s| parse_duration(s).ok_or_else(|| format!("segment[{i}] invalid timeout {s:?}")))
             .transpose()?
             .unwrap_or(Duration::from_secs(5));
         out.push(SegmentConfig {

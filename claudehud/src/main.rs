@@ -133,7 +133,15 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
     let seg_outputs = segments::read_segments();
     print!(
         "{}",
-        render::render(&input, git, &incidents, total_active, rounding, layout, &seg_outputs)
+        render::render(
+            &input,
+            git,
+            &incidents,
+            total_active,
+            rounding,
+            layout,
+            &seg_outputs
+        )
     );
     ExitCode::SUCCESS
 }

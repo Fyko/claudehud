@@ -457,7 +457,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&result);
         assert!(
@@ -477,7 +477,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(plain.contains("claude-sonnet-4-5"));
     }
@@ -498,7 +498,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(plain.contains("50%"));
     }
@@ -513,7 +513,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(plain.contains("(main)"));
     }
@@ -528,7 +528,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
@@ -544,7 +544,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(plain.contains("myproject"));
     }
@@ -565,7 +565,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         assert!(
             result.contains('\n'),
@@ -597,7 +597,7 @@ mod tests {
             1,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -631,7 +631,7 @@ mod tests {
             3,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
@@ -665,7 +665,7 @@ mod tests {
             2,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("API down"));
@@ -684,7 +684,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -726,7 +726,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
@@ -760,7 +760,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(plain.contains("10%"));
         assert!(!plain.contains("100%"));
@@ -783,7 +783,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ))
         .contains("50%"));
         assert!(strip_ansi(&render(
@@ -793,7 +793,7 @@ mod tests {
             0,
             RoundingMode::Ceiling,
             Layout::Comfortable,
-        &[],
+            &[],
         ))
         .contains("51%"));
         assert!(strip_ansi(&render(
@@ -803,7 +803,7 @@ mod tests {
             0,
             RoundingMode::Nearest,
             Layout::Comfortable,
-        &[],
+            &[],
         ))
         .contains("50%"));
     }
@@ -829,7 +829,15 @@ mod tests {
     #[test]
     fn test_render_default_model_condensed() {
         let input = Input::default();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"), "default model name should render");
     }
@@ -845,7 +853,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         ));
         assert!(plain.contains("Opus 4.7"), "short model name should render");
         assert!(
@@ -865,7 +873,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         ));
         assert!(
             plain.contains("myproject(main)"),
@@ -886,7 +894,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         let plain = strip_ansi(&result);
 
         assert!(plain.contains("5h"), "5h label should render");
@@ -932,7 +948,7 @@ mod tests {
             1,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Elevated API errors"));
@@ -957,7 +973,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         ));
         assert!(plain.contains("50%"));
     }
@@ -965,7 +981,15 @@ mod tests {
     #[test]
     fn test_render_condensed_no_rate_limits() {
         let input = Input::default();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"));
         assert!(!plain.contains("5h"));
@@ -981,7 +1005,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("5h"));
         assert!(plain.contains("9%"));
@@ -996,7 +1028,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("7d"));
         assert!(plain.contains("12%"));
@@ -1013,7 +1053,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -1042,7 +1082,7 @@ mod tests {
             3,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
@@ -1052,7 +1092,15 @@ mod tests {
     #[test]
     fn test_render_real_stdin_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
         assert!(
@@ -1090,7 +1138,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(!plain.contains('⏱'), "stopwatch glyph should be gone");
     }
@@ -1108,7 +1156,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(
             plain.contains("$0.13"),
@@ -1128,7 +1176,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         ));
         assert!(plain.contains("$1.46"));
         assert!(plain.contains("💰"));
@@ -1145,7 +1193,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(!plain.contains('$'), "zero cost should be hidden");
         assert!(!plain.contains("💰"));
@@ -1160,7 +1208,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(!plain.contains('$'));
         assert!(!plain.contains("💰"));
@@ -1178,7 +1226,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         assert!(out.contains(fmt::GREEN));
 
@@ -1192,7 +1240,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         assert!(out.contains(fmt::YELLOW));
 
@@ -1206,7 +1254,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         assert!(out.contains(fmt::ORANGE));
 
@@ -1220,7 +1268,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         assert!(out.contains(fmt::RED));
     }
@@ -1235,7 +1283,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model should render");
@@ -1254,7 +1302,15 @@ mod tests {
     #[test]
     fn test_render_api_billing_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"));
         assert!(plain.contains("$0.10"));
@@ -1267,7 +1323,15 @@ mod tests {
     fn test_render_cost_condensed_single_line() {
         let json = r#"{"cost": {"total_cost_usd": 0.42}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed, &[]);
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            &[],
+        );
         assert!(
             !out.contains('\n'),
             "condensed layout must stay single-line"
@@ -1295,7 +1359,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Comfortable,
-        &[],
+            &[],
         ));
         assert!(
             !comfortable.contains("$3.14"),
@@ -1312,7 +1376,7 @@ mod tests {
             0,
             RoundingMode::Floor,
             Layout::Condensed,
-        &[],
+            &[],
         ));
         assert!(
             !condensed.contains("$3.14"),
@@ -1343,7 +1407,10 @@ mod tests {
             &segs,
         );
         let plain = strip_ansi(&result);
-        assert!(plain.contains("prod"), "expected segment text in output: {plain}");
+        assert!(
+            plain.contains("prod"),
+            "expected segment text in output: {plain}"
+        );
     }
 
     #[test]
