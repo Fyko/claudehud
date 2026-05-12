@@ -5,3 +5,4 @@ pub mod input;
 pub mod install;
 pub mod render;
 pub mod time;
+pub mod update;

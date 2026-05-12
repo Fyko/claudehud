@@ -139,6 +139,10 @@ claudehud install --dry-run  # print the resulting JSON without writing
 `claudehud install --help` lists all flags. Respects `$CLAUDE_CONFIG_DIR` and
 accepts `--settings <path>` to point at a non-default settings file.
 
+To upgrade, run `claudehud update` — it re-invokes the official install script
+(idempotent, no-ops if already at the latest tag). Use `claudehud update --check`
+to compare versions without downloading.
+
 Or set it by hand:
 
 ```json
