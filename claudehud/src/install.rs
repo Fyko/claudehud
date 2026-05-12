@@ -53,7 +53,7 @@ pub fn run(mut args: Arguments) -> ExitCode {
     }
 
     let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = resolve_home_dir();
 
     let settings_path = match resolve_settings_path(explicit, config_dir, home) {
         Some(p) => p,
@@ -128,6 +128,15 @@ fn set_statusline_command(value: Value, command: &str) -> Value {
     sl.insert("command".to_string(), Value::String(command.to_string()));
     obj.insert("statusLine".to_string(), Value::Object(sl));
     Value::Object(obj)
+}
+
+/// Resolves the user's home directory. Prefers `$HOME` (set on Unix and inside
+/// most Git Bash / MSYS environments); falls back to `$USERPROFILE` (the
+/// standard Windows env var). Returns `None` if neither is set.
+fn resolve_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 fn resolve_settings_path(
@@ -577,5 +586,42 @@ mod tests {
         .unwrap();
 
         assert!(matches!(outcome, Outcome::SkippedCollision));
+    }
+
+    #[test]
+    fn test_resolve_home_prefers_home_over_userprofile() {
+        // Tests mutate process env and must run serially — see Step 2.
+        let prev_home = std::env::var_os("HOME");
+        let prev_up = std::env::var_os("USERPROFILE");
+        std::env::set_var("HOME", "/tmp/home-wins");
+        std::env::set_var("USERPROFILE", "/tmp/userprofile-loses");
+        let got = resolve_home_dir();
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match prev_up {
+            Some(v) => std::env::set_var("USERPROFILE", v),
+            None => std::env::remove_var("USERPROFILE"),
+        }
+        assert_eq!(got, Some(PathBuf::from("/tmp/home-wins")));
+    }
+
+    #[test]
+    fn test_resolve_home_falls_back_to_userprofile() {
+        let prev_home = std::env::var_os("HOME");
+        let prev_up = std::env::var_os("USERPROFILE");
+        std::env::remove_var("HOME");
+        std::env::set_var("USERPROFILE", "/tmp/userprofile-only");
+        let got = resolve_home_dir();
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match prev_up {
+            Some(v) => std::env::set_var("USERPROFILE", v),
+            None => std::env::remove_var("USERPROFILE"),
+        }
+        assert_eq!(got, Some(PathBuf::from("/tmp/userprofile-only")));
     }
 }

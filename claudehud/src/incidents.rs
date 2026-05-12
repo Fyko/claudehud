@@ -1,14 +1,12 @@
 use std::fs;
 use std::path::Path;
 
-use common::incidents::{
-    seqlock_read_incidents, Incident, INCIDENTS_MMAP_PATH, INCIDENTS_MMAP_SIZE,
-};
+use common::incidents::{incidents_path, seqlock_read_incidents, Incident, INCIDENTS_MMAP_SIZE};
 use memmap2::Mmap;
 
 /// Returns (stored_incidents, total_active_count).
 pub fn read_incidents() -> (Vec<Incident>, u8) {
-    read_incidents_from(Path::new(INCIDENTS_MMAP_PATH))
+    read_incidents_from(&incidents_path())
 }
 
 pub fn read_incidents_from(path: &Path) -> (Vec<Incident>, u8) {

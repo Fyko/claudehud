@@ -1,4 +1,10 @@
 // claudehud-daemon/src/main.rs
+
+// Release builds on Windows use the windows subsystem so no console window
+// flashes at logon when Task Scheduler launches the daemon. Debug builds keep
+// the console subsystem so developers still see stdout/stderr.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod cache;
 mod registrar;
 mod status;
@@ -35,6 +41,12 @@ fn main() -> ExitCode {
             }
         }
     }
+
+    // Ensure cache + watch dirs exist before any thread tries to write into them.
+    // On Unix these resolve to /tmp/ (already present); on Windows they live
+    // under %LOCALAPPDATA%\claudehud\cache and may not exist yet.
+    let _ = std::fs::create_dir_all(common::cache_dir());
+    let _ = std::fs::create_dir_all(common::watch_dir());
 
     let (tx, rx) = crossbeam_channel::unbounded::<PathBuf>();
     let tx2 = tx.clone();

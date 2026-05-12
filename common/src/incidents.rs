@@ -1,7 +1,13 @@
+use std::path::PathBuf;
 use std::sync::atomic::fence;
 use std::sync::atomic::Ordering;
 
-pub const INCIDENTS_MMAP_PATH: &str = "/tmp/clhud-incidents.bin";
+use crate::cache_dir;
+
+/// Path to the daemon-maintained incidents mmap file.
+pub fn incidents_path() -> PathBuf {
+    cache_dir().join("clhud-incidents.bin")
+}
 pub const MAX_STORED_INCIDENTS: usize = 5;
 pub const TITLE_MAX: usize = 128;
 pub const URL_MAX: usize = 255;

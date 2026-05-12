@@ -1,5 +1,5 @@
 use common::incidents::{
-    seqlock_write_incidents, INCIDENTS_MMAP_PATH, INCIDENTS_MMAP_SIZE, MAX_STORED_INCIDENTS,
+    incidents_path, seqlock_write_incidents, INCIDENTS_MMAP_SIZE, MAX_STORED_INCIDENTS,
 };
 use common::incidents::{Incident, Severity};
 use memmap2::MmapMut;
@@ -31,7 +31,7 @@ pub fn start() {
                 etag = new_etag;
                 match parse_atom_result(&body) {
                     Ok((incidents, total)) => {
-                        write_incidents_to_path(Path::new(INCIDENTS_MMAP_PATH), &incidents, total);
+                        write_incidents_to_path(&incidents_path(), &incidents, total);
                     }
                     Err(e) => eprintln!("WARN status parse: {e}"),
                 }

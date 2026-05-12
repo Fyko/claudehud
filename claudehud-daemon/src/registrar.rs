@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use common::WATCH_DIR;
+use common::watch_dir;
 use crossbeam_channel::Sender;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -9,8 +9,8 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 /// path as UTF-8 bytes. Sends each path to `tx` for the watcher to pick up.
 /// Also drains any existing marker files on startup (handles daemon restarts).
 pub fn start(tx: Sender<PathBuf>) {
-    let watch_dir = std::path::Path::new(WATCH_DIR);
-    fs::create_dir_all(watch_dir).expect("failed to create /tmp/clhud-watch");
+    let dir = watch_dir();
+    fs::create_dir_all(&dir).expect("failed to create clhud-watch dir");
 
     let tx2 = tx.clone();
     let mut watcher = RecommendedWatcher::new(
@@ -28,13 +28,13 @@ pub fn start(tx: Sender<PathBuf>) {
     .expect("failed to create notify watcher");
 
     watcher
-        .watch(watch_dir, RecursiveMode::NonRecursive)
-        .expect("failed to watch /tmp/clhud-watch");
+        .watch(&dir, RecursiveMode::NonRecursive)
+        .expect("failed to watch clhud-watch dir");
 
     // Drain existing markers AFTER starting the watcher so no new
     // markers are missed in the window between drain and watch start.
     // Duplicates are safe — the consumer deduplicates by git root.
-    if let Ok(entries) = fs::read_dir(watch_dir) {
+    if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             send_path_from_marker(&entry.path(), &tx);
         }
