@@ -6,6 +6,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod cache;
+mod git_extra;
 mod registrar;
 mod status;
 mod watcher;
