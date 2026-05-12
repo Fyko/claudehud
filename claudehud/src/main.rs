@@ -123,16 +123,18 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
     }
 
     let input: input::Input = serde_json::from_str(&raw).unwrap_or_default();
-    let git = input
+    let git_full = input
         .cwd
         .as_deref()
         .filter(|s| !s.is_empty())
-        .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
+        .and_then(|cwd| git::branch_status(Path::new(cwd)));
+    let git = git_full.as_ref().map(|(b, d, _)| (b.clone(), *d));
+    let git_extra = git_full.as_ref().and_then(|(_, _, e)| e.as_ref());
 
     let (incidents, total_active) = incidents::read_incidents();
     print!(
         "{}",
-        render::render(&input, git, &incidents, total_active, rounding, layout)
+        render::render(&input, git, git_extra, &incidents, total_active, rounding, layout)
     );
     ExitCode::SUCCESS
 }

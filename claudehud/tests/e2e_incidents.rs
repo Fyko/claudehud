@@ -86,6 +86,7 @@ fn test_e2e_single_ongoing_incident() {
     let out = claudehud::render::render(
         &input,
         None,
+        None,
         &read_back,
         total,
         claudehud::render::RoundingMode::Floor,
@@ -138,6 +139,7 @@ fn test_e2e_two_ongoing_incidents() {
     let out = claudehud::render::render(
         &input,
         None,
+        None,
         &read_back,
         total,
         claudehud::render::RoundingMode::Floor,
@@ -179,6 +181,7 @@ fn test_e2e_overflow_shows_plus_n_more() {
     let out = claudehud::render::render(
         &input,
         None,
+        None,
         &read_back,
         total,
         claudehud::render::RoundingMode::Floor,
@@ -202,6 +205,7 @@ fn test_e2e_no_incident_mmap_absent() {
     let input = claudehud::input::Input::default();
     let out = claudehud::render::render(
         &input,
+        None,
         None,
         &incidents,
         total,

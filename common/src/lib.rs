@@ -168,9 +168,22 @@ fn read_u64_le(buf: &[u8], offset: usize) -> u64 {
 
 /// Read the current branch name and dirty flag by invoking git directly.
 /// Shared by the statusline (slow path) and the daemon cache updater.
+/// Handles both normal repos and git worktrees (where `.git` is a file).
 pub fn read_git_status(cwd: &Path) -> Option<(String, bool)> {
     let git_root = find_git_root(cwd)?;
-    let head = std::fs::read_to_string(git_root.join(".git/HEAD")).ok()?;
+    let dot_git = git_root.join(".git");
+    // Resolve HEAD: in a worktree `.git` is a file containing `gitdir: <path>`.
+    let head_path = if dot_git.is_dir() {
+        dot_git.join("HEAD")
+    } else {
+        let content = std::fs::read_to_string(&dot_git).ok()?;
+        let real_git = content
+            .trim()
+            .strip_prefix("gitdir: ")
+            .map(PathBuf::from)?;
+        real_git.join("HEAD")
+    };
+    let head = std::fs::read_to_string(&head_path).ok()?;
     let branch = if let Some(b) = head.trim().strip_prefix("ref: refs/heads/") {
         b.to_owned()
     } else {
