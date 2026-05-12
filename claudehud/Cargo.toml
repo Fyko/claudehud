@@ -13,8 +13,9 @@ path = "src/main.rs"
 [dependencies]
 common = { workspace = true }
 memmap2 = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
 pico-args = "0.5"
-serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 time = { version = "0.3", features = ["local-offset"] }
 
