@@ -43,7 +43,7 @@ claudehud/
 
 Instead of spawning `git` on every render, the daemon holds per-repo status in memory-mapped files at `/tmp/clhud-{fnv32(path)}.bin`. The client reads directly from the mmap — no sockets, no syscalls beyond `open` + `mmap`.
 
-**Cache file layout (138 bytes):**
+**Cache file layout (151 bytes, v1):**
 
 | Offset | Size | Field |
 |--------|------|-------|
@@ -51,6 +51,18 @@ Instead of spawning `git` on every render, the daemon holds per-repo status in m
 | 8 | 1 | `u8` dirty flag |
 | 9 | 1 | `u8` branch name length |
 | 10 | 128 | `[u8; 128]` branch name (UTF-8) |
+| 138 | 1 | `u8` layout version (`0` = legacy 138-byte file, `1` = v1 extension present) |
+| 139 | 4 | `u32` ahead count (LE), commits on local HEAD not on upstream |
+| 143 | 4 | `u32` behind count (LE), commits on upstream not on local HEAD |
+| 147 | 1 | `u8` op_state: 0=None 1=Merge 2=Rebase 3=CherryPick 4=Revert 5=Bisect |
+| 148 | 1 | `u8` op_step (rebase current step, 0 when not rebasing) |
+| 149 | 1 | `u8` op_total (rebase total steps, 0 when not rebasing) |
+| 150 | 1 | `u8` conflict_count (unmerged paths, saturates at 255) |
+
+Old clients reading a new (151-byte) file safely ignore bytes 138–150 — their
+`MMAP_SIZE_V0` guard accepts files ≥ 138 bytes and they only read through offset 137.
+Old daemon files (138 bytes) are accepted by new clients; `GitExtra` fields default
+to zero/None.
 
 **Registration:** on first render for a new directory, the client writes a marker file to `/tmp/clhud-watch/{hash}` containing the absolute path. The daemon watches that directory via FSEvents (macOS) / inotify (Linux) and picks it up.
 
