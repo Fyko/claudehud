@@ -3,40 +3,41 @@ use std::io::Write;
 use std::path::Path;
 
 use common::{
-    hash_path, mmap_path, read_git_status, seqlock_read, watch_dir, watch_path, MMAP_SIZE,
+    hash_path, mmap_path, read_git_status, seqlock_read_full, watch_dir, watch_path, GitExtra,
+    MMAP_SIZE_V0,
 };
 use memmap2::Mmap;
 
-/// Returns (branch, is_dirty) for the git repo containing `cwd`.
+/// Returns (branch, is_dirty, git_extra) for the git repo containing `cwd`.
 /// Fast path: reads from daemon mmap file (~10µs).
-/// Slow path (first render or daemon not running): registers path + runs git.
-pub fn branch_and_dirty(cwd: &Path) -> Option<(String, bool)> {
+/// Slow path (first render or daemon not running): registers path + runs git (no GitExtra).
+pub fn branch_status(cwd: &Path) -> Option<(String, bool, Option<GitExtra>)> {
     let hash = hash_path(cwd);
 
-    // ── Fast path: mmap ──────────────────────────────────
     if let Some(result) = try_mmap_read(hash) {
         return Some(result);
     }
 
-    // ── Slow path: register + direct git ─────────────────
     register(cwd, hash);
-    read_git_status(cwd)
+    read_git_status(cwd).map(|(branch, dirty)| (branch, dirty, None))
 }
 
-fn try_mmap_read(hash: u32) -> Option<(String, bool)> {
+fn try_mmap_read(hash: u32) -> Option<(String, bool, Option<GitExtra>)> {
     let file = fs::File::open(mmap_path(hash)).ok()?;
-    if file.metadata().ok()?.len() != MMAP_SIZE as u64 {
+    let len = file.metadata().ok()?.len() as usize;
+    // Accept both v0 (138) and v1 (151) files.
+    if len < MMAP_SIZE_V0 {
         return None;
     }
     // Safety: `file` holds the fd open; even if the daemon unlinks and
     // recreates the path on disk, we map the original inode, so the
-    // MMAP_SIZE check above is sufficient to validate the buffer layout.
+    // MMAP_SIZE_V0 check above is sufficient to validate the buffer layout.
     let mmap = unsafe { Mmap::map(&file) }.ok()?;
-    let (branch, dirty) = seqlock_read(&mmap);
+    let (branch, dirty, extra) = seqlock_read_full(&mmap);
     if branch.is_empty() {
         None
     } else {
-        Some((branch, dirty))
+        Some((branch, dirty, extra))
     }
 }
 
@@ -53,18 +54,26 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn test_branch_and_dirty_in_git_repo() {
-        // This test runs inside the claudehud repo
+    fn test_branch_status_in_git_repo() {
         let cwd = std::env::current_dir().unwrap();
-        let result = branch_and_dirty(&cwd);
+        let result = branch_status(&cwd);
         assert!(result.is_some(), "expected git info for current dir");
-        let (branch, _dirty) = result.unwrap();
+        let (branch, _dirty, _extra) = result.unwrap();
         assert!(!branch.is_empty(), "branch should not be empty");
     }
 
     #[test]
-    fn test_branch_and_dirty_not_git() {
-        let result = branch_and_dirty(Path::new("/tmp"));
+    fn test_branch_status_not_git() {
+        let result = branch_status(Path::new("/tmp"));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_branch_status_returns_git_extra_shape() {
+        let cwd = std::env::current_dir().unwrap();
+        let result = branch_status(&cwd);
+        assert!(result.is_some());
+        let (branch, _dirty, _extra) = result.unwrap();
+        assert!(!branch.is_empty());
     }
 }

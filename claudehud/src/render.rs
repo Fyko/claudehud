@@ -3,6 +3,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::incidents::Incident;
+use common::{GitExtra, OpState};
 
 use crate::fmt::{self, *};
 use crate::input::Input;
@@ -56,20 +57,26 @@ impl Layout {
 pub fn render(
     input: &Input,
     git: Option<(String, bool)>,
+    git_extra: Option<&GitExtra>,
     incidents: &[Incident],
     total_active: u8,
     rounding: RoundingMode,
     layout: Layout,
 ) -> String {
     match layout {
-        Layout::Comfortable => render_comfortable(input, git, incidents, total_active, rounding),
-        Layout::Condensed => render_condensed(input, git, incidents, total_active, rounding),
+        Layout::Comfortable => {
+            render_comfortable(input, git, git_extra, incidents, total_active, rounding)
+        }
+        Layout::Condensed => {
+            render_condensed(input, git, git_extra, incidents, total_active, rounding)
+        }
     }
 }
 
 fn render_comfortable(
     input: &Input,
     git: Option<(String, bool)>,
+    git_extra: Option<&GitExtra>,
     incidents: &[Incident],
     total_active: u8,
     rounding: RoundingMode,
@@ -88,7 +95,7 @@ fn render_comfortable(
 
     // ── Dir + git ──────────────────────────────────────────
     out.push_str(SEP);
-    push_dir_branch(input, git.as_ref(), false, &mut out);
+    push_dir_branch(input, git.as_ref(), git_extra, false, &mut out);
 
     // ── Incident lines (between line 1 and rate limits) ────
     push_incidents(incidents, total_active, &mut out);
@@ -118,6 +125,7 @@ fn render_comfortable(
 fn render_condensed(
     input: &Input,
     git: Option<(String, bool)>,
+    git_extra: Option<&GitExtra>,
     incidents: &[Incident],
     total_active: u8,
     rounding: RoundingMode,
@@ -136,7 +144,7 @@ fn render_condensed(
 
     // ── Dir + git (tight) ──────────────────────────────────
     out.push_str(SEP);
-    push_dir_branch(input, git.as_ref(), true, &mut out);
+    push_dir_branch(input, git.as_ref(), git_extra, true, &mut out);
 
     // ── Rate limits inline ─────────────────────────────────
     if let Some(rl) = &input.rate_limits {
@@ -217,15 +225,30 @@ fn push_context(input: &Input, rounding: RoundingMode, out: &mut String) {
     out.push_str(RESET);
 }
 
-fn push_dir_branch(input: &Input, git: Option<&(String, bool)>, tight: bool, out: &mut String) {
+fn push_dir_branch(
+    input: &Input,
+    git: Option<&(String, bool)>,
+    extra: Option<&GitExtra>,
+    tight: bool,
+    out: &mut String,
+) {
     let cwd = input.cwd.as_deref().unwrap_or("");
     let dirname = Path::new(cwd)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(cwd);
+
+    // Comfortable: op-state badge prepended before dir+branch
+    if !tight {
+        if let Some(ex) = extra {
+            push_op_badge_comfortable(ex, out);
+        }
+    }
+
     out.push_str(CYAN);
     out.push_str(dirname);
     out.push_str(RESET);
+
     if let Some((branch, dirty)) = git {
         if !tight {
             out.push(' ');
@@ -239,6 +262,81 @@ fn push_dir_branch(input: &Input, git: Option<&(String, bool)>, tight: bool, out
         }
         out.push_str(GREEN);
         out.push(')');
+        out.push_str(RESET);
+
+        // Ahead/behind
+        if let Some(ex) = extra {
+            if ex.ahead > 0 {
+                out.push(' ');
+                out.push_str(GREEN);
+                write!(out, "↑{}", ex.ahead).unwrap();
+                out.push_str(RESET);
+            }
+            if ex.behind > 0 {
+                out.push(' ');
+                out.push_str(RED);
+                write!(out, "↓{}", ex.behind).unwrap();
+                out.push_str(RESET);
+            }
+        }
+
+        // Condensed: op-state + conflicts inline after branch
+        if tight {
+            if let Some(ex) = extra {
+                push_op_badge_condensed(ex, out);
+            }
+        }
+    }
+}
+
+fn push_op_badge_comfortable(ex: &GitExtra, out: &mut String) {
+    let label = match ex.op_state {
+        OpState::None => return,
+        OpState::Merge => "MERGING".to_string(),
+        OpState::Rebase => {
+            if ex.op_step > 0 || ex.op_total > 0 {
+                format!("REBASE {}/{}", ex.op_step, ex.op_total)
+            } else {
+                "REBASE".to_string()
+            }
+        }
+        OpState::CherryPick => "CHERRY-PICK".to_string(),
+        OpState::Revert => "REVERTING".to_string(),
+        OpState::Bisect => "BISECTING".to_string(),
+    };
+    out.push_str(YELLOW);
+    out.push_str(&label);
+    out.push_str(RESET);
+    if ex.conflict_count > 0 {
+        out.push_str(DIM);
+        write!(out, " · {} conflicts", ex.conflict_count).unwrap();
+        out.push_str(RESET);
+    }
+    out.push_str(SEP);
+}
+
+fn push_op_badge_condensed(ex: &GitExtra, out: &mut String) {
+    let badge = match ex.op_state {
+        OpState::None => return,
+        OpState::Merge => "M".to_string(),
+        OpState::Rebase => {
+            if ex.op_step > 0 || ex.op_total > 0 {
+                format!("R {}/{}", ex.op_step, ex.op_total)
+            } else {
+                "R".to_string()
+            }
+        }
+        OpState::CherryPick => "CP".to_string(),
+        OpState::Revert => "REV".to_string(),
+        OpState::Bisect => "BIS".to_string(),
+    };
+    out.push(' ');
+    out.push_str(YELLOW);
+    out.push_str(&badge);
+    out.push_str(RESET);
+    if ex.conflict_count > 0 {
+        out.push_str(RED);
+        write!(out, "!{}", ex.conflict_count).unwrap();
         out.push_str(RESET);
     }
 }
@@ -402,6 +500,7 @@ mod tests {
         let result = render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -420,6 +519,7 @@ mod tests {
         let input: Input = serde_json::from_str(json).unwrap();
         let plain = strip_ansi(&render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -441,6 +541,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -455,6 +556,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             Some(("main".to_string(), false)),
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -469,6 +571,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             Some(("main".to_string(), true)),
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -483,6 +586,7 @@ mod tests {
         let input: Input = serde_json::from_str(json).unwrap();
         let plain = strip_ansi(&render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -503,6 +607,7 @@ mod tests {
         let input: Input = serde_json::from_str(json).unwrap();
         let result = render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -534,6 +639,7 @@ mod tests {
         let input = Input::default();
         let out = render(
             &input,
+            None,
             None,
             &[incident],
             1,
@@ -568,6 +674,7 @@ mod tests {
         let out = render(
             &Input::default(),
             None,
+            None,
             &[incident],
             3,
             RoundingMode::Floor,
@@ -601,6 +708,7 @@ mod tests {
         let out = render(
             &Input::default(),
             None,
+            None,
             &incidents,
             2,
             RoundingMode::Floor,
@@ -618,6 +726,7 @@ mod tests {
     fn test_render_no_incident_unchanged_shape() {
         let out = render(
             &Input::default(),
+            None,
             None,
             &[],
             0,
@@ -660,6 +769,7 @@ mod tests {
         let out = render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -693,6 +803,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -715,6 +826,7 @@ mod tests {
         assert!(strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -724,6 +836,7 @@ mod tests {
         assert!(strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Ceiling,
@@ -732,6 +845,7 @@ mod tests {
         .contains("51%"));
         assert!(strip_ansi(&render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -762,7 +876,15 @@ mod tests {
     #[test]
     fn test_render_default_model_condensed() {
         let input = Input::default();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"), "default model name should render");
     }
@@ -773,6 +895,7 @@ mod tests {
         let input: Input = serde_json::from_str(json).unwrap();
         let plain = strip_ansi(&render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -793,6 +916,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             Some(("main".to_string(), false)),
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -817,7 +941,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
 
         assert!(plain.contains("5h"), "5h label should render");
@@ -859,6 +991,7 @@ mod tests {
         let out = render(
             &Input::default(),
             None,
+            None,
             &[incident],
             1,
             RoundingMode::Floor,
@@ -883,6 +1016,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -894,7 +1028,15 @@ mod tests {
     #[test]
     fn test_render_condensed_no_rate_limits() {
         let input = Input::default();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"));
         assert!(!plain.contains("5h"));
@@ -910,7 +1052,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("5h"));
         assert!(plain.contains("9%"));
@@ -925,7 +1075,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("7d"));
         assert!(plain.contains("12%"));
@@ -938,6 +1096,7 @@ mod tests {
         let out = render(
             &input,
             Some(("main".to_string(), true)),
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -966,6 +1125,7 @@ mod tests {
         let out = render(
             &Input::default(),
             None,
+            None,
             &[incident],
             3,
             RoundingMode::Floor,
@@ -979,7 +1139,15 @@ mod tests {
     #[test]
     fn test_render_real_stdin_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let out = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
         assert!(
@@ -1013,6 +1181,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -1029,6 +1198,7 @@ mod tests {
         let input: Input = serde_json::from_str(json).unwrap();
         let plain = strip_ansi(&render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -1049,6 +1219,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -1065,6 +1236,7 @@ mod tests {
         let plain = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -1078,6 +1250,7 @@ mod tests {
     fn test_render_cost_skipped_when_absent() {
         let plain = strip_ansi(&render(
             &Input::default(),
+            None,
             None,
             &[],
             0,
@@ -1096,6 +1269,7 @@ mod tests {
         let out = render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -1108,6 +1282,7 @@ mod tests {
         let input: Input = serde_json::from_str(json).unwrap();
         let out = render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -1122,6 +1297,7 @@ mod tests {
         let out = render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -1134,6 +1310,7 @@ mod tests {
         let input: Input = serde_json::from_str(json).unwrap();
         let out = render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -1148,6 +1325,7 @@ mod tests {
         let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
         let out = render(
             &input,
+            None,
             None,
             &[],
             0,
@@ -1171,7 +1349,15 @@ mod tests {
     #[test]
     fn test_render_api_billing_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let out = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"));
         assert!(plain.contains("$0.10"));
@@ -1184,7 +1370,15 @@ mod tests {
     fn test_render_cost_condensed_single_line() {
         let json = r#"{"cost": {"total_cost_usd": 0.42}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let out = render(
+            &input,
+            None,
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         assert!(
             !out.contains('\n'),
             "condensed layout must stay single-line"
@@ -1208,6 +1402,7 @@ mod tests {
         let comfortable = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -1224,6 +1419,7 @@ mod tests {
         let condensed = strip_ansi(&render(
             &input,
             None,
+            None,
             &[],
             0,
             RoundingMode::Floor,
@@ -1235,5 +1431,275 @@ mod tests {
         );
         assert!(!condensed.contains("💰"));
         assert!(condensed.contains("5h"));
+    }
+
+    // ── Ahead/behind and op-state tests ──────────────────────────────────────
+
+    fn make_extra(
+        ahead: u32,
+        behind: u32,
+        op_state: OpState,
+        op_step: u8,
+        op_total: u8,
+        conflict_count: u8,
+    ) -> GitExtra {
+        GitExtra {
+            ahead,
+            behind,
+            op_state,
+            op_step,
+            op_total,
+            conflict_count,
+        }
+    }
+
+    #[test]
+    fn test_render_ahead_only() {
+        let input = Input::default();
+        let extra = make_extra(3, 0, OpState::None, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("↑3"), "ahead arrow should appear");
+        assert!(!plain.contains("↓"), "no behind arrow when behind=0");
+    }
+
+    #[test]
+    fn test_render_behind_only() {
+        let input = Input::default();
+        let extra = make_extra(0, 2, OpState::None, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("↓2"), "behind arrow should appear");
+        assert!(!plain.contains("↑"), "no ahead arrow when ahead=0");
+    }
+
+    #[test]
+    fn test_render_ahead_and_behind() {
+        let input = Input::default();
+        let extra = make_extra(3, 1, OpState::None, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("↑3"), "ahead");
+        assert!(plain.contains("↓1"), "behind");
+    }
+
+    #[test]
+    fn test_render_zero_ahead_behind_hidden() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::None, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(!plain.contains('↑'), "no ahead when zero");
+        assert!(!plain.contains('↓'), "no behind when zero");
+    }
+
+    #[test]
+    fn test_render_merge_state() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::Merge, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("MERGING"), "MERGING badge");
+    }
+
+    #[test]
+    fn test_render_rebase_state_with_progress() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::Rebase, 2, 5, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("REBASE 2/5"), "rebase badge with progress");
+    }
+
+    #[test]
+    fn test_render_cherry_pick_no_conflicts() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::CherryPick, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("CHERRY-PICK"), "cherry-pick badge");
+        assert!(!plain.contains("conflict"), "no conflict text when count=0");
+    }
+
+    #[test]
+    fn test_render_merge_with_conflicts() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::Merge, 0, 0, 3);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("MERGING"));
+        assert!(plain.contains("3 conflicts"), "conflict count shown");
+    }
+
+    #[test]
+    fn test_render_revert_state() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::Revert, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("REVERTING"), "revert badge");
+    }
+
+    #[test]
+    fn test_render_bisect_state() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::Bisect, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(plain.contains("BISECTING"), "bisect badge");
+    }
+
+    #[test]
+    fn test_render_ahead_behind_condensed() {
+        let input = Input::default();
+        let extra = make_extra(3, 1, OpState::None, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(plain.contains("↑3"), "ahead condensed");
+        assert!(plain.contains("↓1"), "behind condensed");
+    }
+
+    #[test]
+    fn test_render_rebase_condensed() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::Rebase, 2, 5, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(plain.contains("R 2/5"), "condensed rebase badge");
+    }
+
+    #[test]
+    fn test_render_merge_condensed_with_conflicts() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::Merge, 0, 0, 3);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(plain.contains('M'), "condensed merge badge");
+        assert!(plain.contains("!3"), "condensed conflict count");
+    }
+
+    #[test]
+    fn test_render_cherry_pick_condensed() {
+        let input = Input::default();
+        let extra = make_extra(0, 0, OpState::CherryPick, 0, 0, 0);
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            Some(&extra),
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        ));
+        assert!(plain.contains("CP"), "condensed cherry-pick badge");
+    }
+
+    #[test]
+    fn test_render_none_extra_no_arrows() {
+        let input = Input::default();
+        let plain = strip_ansi(&render(
+            &input,
+            Some(("main".to_string(), false)),
+            None,
+            &[],
+            0,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        ));
+        assert!(!plain.contains('↑'));
+        assert!(!plain.contains('↓'));
+        assert!(!plain.contains("MERGING"));
+        assert!(!plain.contains("REBASE"));
     }
 }
