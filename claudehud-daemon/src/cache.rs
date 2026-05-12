@@ -2,7 +2,9 @@ use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::atomic::{fence, Ordering};
 
-use common::{find_git_root, hash_path, mmap_path, read_git_status, GitExtra, BRANCH_MAX, MMAP_SIZE};
+use common::{
+    find_git_root, hash_path, mmap_path, read_git_status, GitExtra, BRANCH_MAX, MMAP_SIZE,
+};
 use memmap2::MmapMut;
 
 use crate::git_extra::read_git_extra;

@@ -134,7 +134,15 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
     let (incidents, total_active) = incidents::read_incidents();
     print!(
         "{}",
-        render::render(&input, git, git_extra, &incidents, total_active, rounding, layout)
+        render::render(
+            &input,
+            git,
+            git_extra,
+            &incidents,
+            total_active,
+            rounding,
+            layout
+        )
     );
     ExitCode::SUCCESS
 }

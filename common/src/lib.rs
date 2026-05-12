@@ -148,7 +148,14 @@ pub fn seqlock_read_full(mmap: &[u8]) -> (String, bool, Option<GitExtra>) {
             let op_step = mmap[148];
             let op_total = mmap[149];
             let conflict_count = mmap[150];
-            Some(GitExtra { ahead, behind, op_state, op_step, op_total, conflict_count })
+            Some(GitExtra {
+                ahead,
+                behind,
+                op_state,
+                op_step,
+                op_total,
+                conflict_count,
+            })
         } else {
             None
         };
@@ -177,10 +184,7 @@ pub fn read_git_status(cwd: &Path) -> Option<(String, bool)> {
         dot_git.join("HEAD")
     } else {
         let content = std::fs::read_to_string(&dot_git).ok()?;
-        let real_git = content
-            .trim()
-            .strip_prefix("gitdir: ")
-            .map(PathBuf::from)?;
+        let real_git = content.trim().strip_prefix("gitdir: ").map(PathBuf::from)?;
         real_git.join("HEAD")
     };
     let head = std::fs::read_to_string(&head_path).ok()?;
@@ -283,7 +287,10 @@ mod tests {
     fn test_op_state_roundtrip() {
         use super::OpState;
         for v in [0u8, 1, 2, 3, 4, 5] {
-            assert_eq!(OpState::from_u8(OpState::from_u8(v) as u8), OpState::from_u8(v));
+            assert_eq!(
+                OpState::from_u8(OpState::from_u8(v) as u8),
+                OpState::from_u8(v)
+            );
         }
         // unknown value maps to None
         assert_eq!(OpState::from_u8(99) as u8, 0);

@@ -3,8 +3,8 @@ use std::io::Write;
 use std::path::Path;
 
 use common::{
-    hash_path, mmap_path, read_git_status, seqlock_read_full, watch_dir, watch_path,
-    GitExtra, MMAP_SIZE_V0,
+    hash_path, mmap_path, read_git_status, seqlock_read_full, watch_dir, watch_path, GitExtra,
+    MMAP_SIZE_V0,
 };
 use memmap2::Mmap;
 

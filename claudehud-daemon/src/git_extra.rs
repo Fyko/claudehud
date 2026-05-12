@@ -11,14 +11,23 @@ pub fn read_git_extra(git_root: &Path) -> GitExtra {
     } else {
         (0, 0)
     };
-    let conflict_count =
-        if matches!(op_state, OpState::Merge | OpState::Rebase | OpState::CherryPick) {
-            count_conflicts(git_root)
-        } else {
-            0
-        };
+    let conflict_count = if matches!(
+        op_state,
+        OpState::Merge | OpState::Rebase | OpState::CherryPick
+    ) {
+        count_conflicts(git_root)
+    } else {
+        0
+    };
     let (ahead, behind) = read_ahead_behind(git_root);
-    GitExtra { ahead, behind, op_state, op_step, op_total, conflict_count }
+    GitExtra {
+        ahead,
+        behind,
+        op_state,
+        op_step,
+        op_total,
+        conflict_count,
+    }
 }
 
 fn detect_op_state(dot_git: &Path) -> OpState {
@@ -43,9 +52,15 @@ fn detect_op_state(dot_git: &Path) -> OpState {
 fn read_rebase_progress(dot_git: &Path) -> (u8, u8) {
     // rebase-merge uses "msgnum" / "end"; rebase-apply uses "next" / "last"
     let (step_file, total_file) = if dot_git.join("rebase-merge").is_dir() {
-        (dot_git.join("rebase-merge/msgnum"), dot_git.join("rebase-merge/end"))
+        (
+            dot_git.join("rebase-merge/msgnum"),
+            dot_git.join("rebase-merge/end"),
+        )
     } else {
-        (dot_git.join("rebase-apply/next"), dot_git.join("rebase-apply/last"))
+        (
+            dot_git.join("rebase-apply/next"),
+            dot_git.join("rebase-apply/last"),
+        )
     };
     let step = read_u8_file(&step_file);
     let total = read_u8_file(&total_file);
@@ -100,7 +115,7 @@ fn read_ahead_behind(git_root: &Path) -> (u32, u32) {
         return (0, 0);
     }
     let s = String::from_utf8_lossy(&out.stdout);
-    let mut parts = s.trim().split_whitespace();
+    let mut parts = s.split_whitespace();
     let behind: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     let ahead: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     (ahead, behind)
