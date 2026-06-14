@@ -8,6 +8,7 @@
 mod cache;
 mod registrar;
 mod status;
+mod update;
 mod watcher;
 
 use std::path::PathBuf;
