@@ -100,7 +100,8 @@ fn read_u64_le(buf: &[u8], offset: usize) -> u64 {
 /// Shared by the statusline (slow path) and the daemon cache updater.
 pub fn read_git_status(cwd: &Path) -> Option<(String, bool)> {
     let git_root = find_git_root(cwd)?;
-    let head = std::fs::read_to_string(git_root.join(".git/HEAD")).ok()?;
+    let gitdir = resolve_gitdir(&git_root)?;
+    let head = std::fs::read_to_string(gitdir.join("HEAD")).ok()?;
     let branch = if let Some(b) = head.trim().strip_prefix("ref: refs/heads/") {
         b.to_owned()
     } else {
@@ -281,5 +282,36 @@ mod tests {
     fn test_resolve_gitdir_missing_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(resolve_gitdir(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn test_read_git_status_in_worktree_returns_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+
+        // Init repo, make an initial commit on `main`, branch `feature/one`,
+        // then `git worktree add ../wt-one feature/one`.
+        let run = |cwd: &std::path::Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("git failed to start");
+            assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        run(&repo, &["init", "-q", "-b", "main"]);
+        run(&repo, &["config", "user.email", "t@t"]);
+        run(&repo, &["config", "user.name", "t"]);
+        std::fs::write(repo.join("a"), "hi").unwrap();
+        run(&repo, &["add", "a"]);
+        run(&repo, &["commit", "-q", "-m", "init"]);
+        run(&repo, &["branch", "feature/one"]);
+
+        let wt = tmp.path().join("wt-one");
+        run(&repo, &["worktree", "add", "-q", wt.to_str().unwrap(), "feature/one"]);
+
+        let (branch, _dirty) = read_git_status(&wt).expect("worktree branch must resolve");
+        assert_eq!(branch, "feature/one", "branch from worktree HEAD, not cwd basename");
     }
 }
