@@ -76,47 +76,65 @@ pub fn start() {
         .timeout_read(Duration::from_secs(15))
         .build();
 
-    let mut etag: Option<String> = None;
-    std::thread::sleep(FIRST_DELAY);
-    loop {
-        match fetch_latest_tag(&agent, etag.as_deref()) {
-            Ok(Some((tag, new_etag))) => {
-                etag = new_etag;
-                let installed = env!("CARGO_PKG_VERSION");
-                if let Some(target_tag) = decide_target(installed, &tag, cfg.pin.as_deref()) {
-                    if let Err(e) = perform_update(&agent, &install_dir, target, &target_tag) {
-                        eprintln!("WARN autoupdate: {e}");
-                    }
-                    // perform_update exits the process on success; if we're still
-                    // here it failed — keep polling.
-                }
-            }
-            Ok(None) => {} // 304 Not Modified
-            Err(e) => eprintln!("WARN autoupdate fetch: {e}"),
-        }
-        std::thread::sleep(POLL_INTERVAL);
-    }
+    // The poll source and the download step share one agent (it's an Arc
+    // internally, so the clone is cheap); the source owns its clone, the loop
+    // body uses the original for `perform_update`'s downloads.
+    let source = crate::poll::UreqSource::new(agent.clone(), RELEASES_API);
+    run_update_poll(
+        &source,
+        &crate::poll::RealClock,
+        &agent,
+        &install_dir,
+        target,
+        cfg.pin.as_deref(),
+        FIRST_DELAY,
+        POLL_INTERVAL,
+    );
 }
 
-/// Conditional GET of the latest release. `Ok(None)` on 304.
-fn fetch_latest_tag(
-    agent: &ureq::Agent,
-    etag: Option<&str>,
-) -> Result<Option<(String, Option<String>)>, String> {
-    let mut req = agent.get(RELEASES_API);
-    if let Some(tag) = etag {
-        req = req.set("If-None-Match", tag);
-    }
-    match req.call() {
-        Ok(resp) => {
-            let new_etag = resp.header("ETag").map(str::to_string);
-            let body = resp.into_string().map_err(|e| e.to_string())?;
-            let tag = common::version::parse_tag(body.as_bytes()).map_err(|e| e.to_string())?;
-            Ok(Some((tag, new_etag)))
-        }
-        Err(ureq::Error::Status(304, _)) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+/// The autoupdate adapter over the shared poll loop: on each fresh releases
+/// body, parse the latest tag, decide whether to move, and if so perform the
+/// update. A parse failure (or no-update decision) no-ops per ADR-0001;
+/// `perform_update` exits the process on success, so a return here means it
+/// failed and the loop keeps polling.
+#[allow(clippy::too_many_arguments)]
+fn run_update_poll<S, C>(
+    source: &S,
+    clock: &C,
+    download_agent: &ureq::Agent,
+    install_dir: &Path,
+    target: &str,
+    pin: Option<&str>,
+    first_delay: Duration,
+    interval: Duration,
+) where
+    S: crate::poll::ConditionalGet,
+    C: crate::poll::Clock,
+{
+    let installed = env!("CARGO_PKG_VERSION");
+    crate::poll::run_poll_loop(
+        source,
+        clock,
+        "autoupdate",
+        Some(first_delay),
+        interval,
+        |body| {
+            let tag = match common::version::parse_tag(body.as_bytes()) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("WARN autoupdate parse: {e}");
+                    return;
+                }
+            };
+            if let Some(target_tag) = decide_target(installed, &tag, pin) {
+                if let Err(e) = perform_update(download_agent, install_dir, target, &target_tag) {
+                    eprintln!("WARN autoupdate: {e}");
+                }
+                // perform_update exits the process on success; if we're still
+                // here it failed — keep polling.
+            }
+        },
+    );
 }
 
 const BASE_URL: &str = "https://github.com/fyko/claudehud/releases/download";
@@ -287,6 +305,56 @@ mod tests {
 
         assert_eq!(std::fs::read(&dest).unwrap(), b"NEW");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn update_poll_cycle_uptodate_decides_no_update_no_io() {
+        // Drive a full autoupdate poll cycle with a fake network + fake clock:
+        // fetch a releases body whose tag equals the installed version, so
+        // `decide_target` returns None and no download/swap IO is attempted.
+        // A second cycle returns 304, proving the etag from cycle 1 is sent
+        // back as If-None-Match. No real HTTP, no real sleep.
+        use crate::poll::test_support::{FakeClock, FakeSource};
+        use crate::poll::FetchOutcome;
+
+        let installed = env!("CARGO_PKG_VERSION");
+        let body = format!("{{\"tag_name\":\"v{installed}\"}}");
+        let source = FakeSource::new(vec![
+            Ok(FetchOutcome::Body {
+                body,
+                etag: Some("rel-etag".to_string()),
+            }),
+            Ok(FetchOutcome::NotModified),
+        ]);
+        let clock = FakeClock::keep_for(2);
+        // The download agent is never used because no update is decided.
+        let agent = ureq::AgentBuilder::new().build();
+
+        run_update_poll(
+            &source,
+            &clock,
+            &agent,
+            Path::new("/does/not/matter"),
+            "x86_64-unknown-linux-musl",
+            None,
+            Duration::from_secs(60),
+            Duration::from_secs(300),
+        );
+
+        // First request unconditional; second carried the etag from cycle 1.
+        assert_eq!(
+            source.seen_etags.borrow().as_slice(),
+            &[None, Some("rel-etag".to_string())]
+        );
+        // First-delay honored before the two interval sleeps.
+        assert_eq!(
+            clock.slept.borrow().as_slice(),
+            &[
+                Duration::from_secs(60),
+                Duration::from_secs(300),
+                Duration::from_secs(300)
+            ]
+        );
     }
 
     #[test]
