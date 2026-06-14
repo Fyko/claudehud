@@ -97,6 +97,10 @@ latest_tag() {
 # ---------------------------------------------------------------------------
 
 download() {
+    # `local` is honored by every sh this runs under (dash, busybox ash, bash).
+    # Without it these would clobber the caller's globals — e.g. the install
+    # loop's $dest — since POSIX sh functions share the parent scope.
+    local url dest
     url="$1"
     dest="$2"
     if command -v curl >/dev/null 2>&1; then
@@ -107,6 +111,7 @@ download() {
 }
 
 verify_sha256() {
+    local file url sidecar expected actual
     file="$1"; url="$2"
     if [ -n "${CLAUDEHUD_SKIP_CHECKSUM:-}" ]; then
         printf '\033[33mwarning:\033[0m CLAUDEHUD_SKIP_CHECKSUM set, skipping verification for %s\n' "$(basename "$file")" >&2
