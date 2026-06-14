@@ -18,6 +18,9 @@ pub struct Input {
     pub fast_mode: Option<bool>,
     pub exceeds_200k_tokens: Option<bool>,
     pub rate_limits: Option<RateLimits>,
+    pub agent: Option<Agent>,
+    pub agent_type: Option<String>,
+    pub worktree: Option<Worktree>,
 }
 
 #[derive(Deserialize)]
@@ -90,6 +93,19 @@ pub struct RateLimits {
 pub struct RateWindow {
     pub used_percentage: Option<f64>,
     pub resets_at: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub struct Agent {
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct Worktree {
+    pub name: Option<String>,
+    pub branch: Option<String>,
+    pub original_cwd: Option<String>,
+    pub original_branch: Option<String>,
 }
 
 /// Anonymized capture of a real Claude Code statusline stdin payload on a
@@ -179,6 +195,51 @@ pub(crate) const API_BILLING_FIXTURE: &str = r#"{
         "fast_mode": false,
         "thinking": {"enabled": true}
     }"#;
+
+/// Anonymized capture of a real background-agent statusline payload.
+/// Distinguishing keys vs `REAL_STDIN_FIXTURE`: `agent`, `agent_type`.
+#[cfg(test)]
+pub(crate) const BG_AGENT_FIXTURE: &str = r#"{
+    "session_id": "00000000-0000-0000-0000-000000000000",
+    "transcript_path": "/tmp/transcripts/bg.jsonl",
+    "cwd": "/home/user/project",
+    "agent": {"name": "claude"},
+    "agent_type": "claude",
+    "model": {"id": "claude-opus-4-7", "display_name": "Opus 4.7"},
+    "workspace": {
+        "current_dir": "/home/user/project",
+        "project_dir": "/home/user/project",
+        "added_dirs": []
+    },
+    "version": "2.1.139",
+    "output_style": {"name": "Gen-Z"},
+    "exceeds_200k_tokens": false,
+    "fast_mode": false,
+    "thinking": {"enabled": true}
+}"#;
+
+/// Background-agent payload running inside a CC-native worktree. Adds the
+/// top-level `worktree` block.
+#[cfg(test)]
+pub(crate) const BG_AGENT_WORKTREE_FIXTURE: &str = r#"{
+    "session_id": "00000000-0000-0000-0000-000000000000",
+    "transcript_path": "/tmp/transcripts/bg.jsonl",
+    "cwd": "/home/user/.claude/worktrees/example",
+    "agent": {"name": "claude"},
+    "agent_type": "claude",
+    "worktree": {
+        "name": "example/branch-name",
+        "path": "/home/user/.claude/worktrees/example",
+        "branch": "worktree-example+branch-name",
+        "original_cwd": "/home/user/project",
+        "original_branch": "feature/example"
+    },
+    "model": {"id": "claude-opus-4-7", "display_name": "Opus 4.7"},
+    "version": "2.1.139",
+    "exceeds_200k_tokens": false,
+    "fast_mode": false,
+    "thinking": {"enabled": true}
+}"#;
 
 #[cfg(test)]
 mod tests {
@@ -283,5 +344,35 @@ mod tests {
                 .and_then(|cw| cw.context_window_size),
             Some(1_000_000)
         );
+    }
+
+    #[test]
+    fn test_deserialize_bg_agent_fixture() {
+        let input: Input = serde_json::from_str(BG_AGENT_FIXTURE).unwrap();
+        assert_eq!(input.agent_type.as_deref(), Some("claude"));
+        assert_eq!(
+            input.agent.as_ref().and_then(|a| a.name.as_deref()),
+            Some("claude")
+        );
+        assert!(input.worktree.is_none(), "non-native-worktree bg payload has no worktree block");
+    }
+
+    #[test]
+    fn test_deserialize_bg_agent_worktree_fixture() {
+        let input: Input = serde_json::from_str(BG_AGENT_WORKTREE_FIXTURE).unwrap();
+        let wt = input.worktree.as_ref().expect("worktree block must parse");
+        assert_eq!(wt.original_branch.as_deref(), Some("feature/example"));
+        assert_eq!(wt.name.as_deref(), Some("example/branch-name"));
+        assert_eq!(wt.original_cwd.as_deref(), Some("/home/user/project"));
+        // Auto-generated branch present but ignored downstream.
+        assert_eq!(wt.branch.as_deref(), Some("worktree-example+branch-name"));
+    }
+
+    #[test]
+    fn test_fg_fixture_has_no_agent_fields() {
+        let input: Input = serde_json::from_str(REAL_STDIN_FIXTURE).unwrap();
+        assert!(input.agent.is_none());
+        assert!(input.agent_type.is_none());
+        assert!(input.worktree.is_none());
     }
 }
