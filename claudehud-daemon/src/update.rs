@@ -122,6 +122,13 @@ fn fetch_latest_tag(
 const BASE_URL: &str = "https://github.com/fyko/claudehud/releases/download";
 const BINARIES: [&str; 2] = ["claudehud", "claudehud-daemon"];
 
+/// Normalize a tag to a canonical `v`-prefixed form.
+/// GitHub download paths require the literal `v` prefix — a hand-edited pin
+/// like `pin=0.2.0` would otherwise produce a 404 URL forever.
+fn normalized_tag(tag: &str) -> String {
+    format!("v{}", tag.trim_start_matches('v'))
+}
+
 /// Download both binaries + sidecars, verify, swap in place, write the notice,
 /// then exit so the service manager relaunches the new daemon. On any failure,
 /// returns `Err` having mutated nothing on disk (verify-before-swap).
@@ -131,6 +138,11 @@ fn perform_update(
     target: &str,
     tag: &str,
 ) -> Result<(), String> {
+    // GitHub download paths need the literal `v`-prefixed tag; a hand-edited
+    // pin like `pin=0.2.0` would otherwise 404 forever. Normalize once.
+    let tag = normalized_tag(tag);
+    let tag = tag.as_str();
+
     // 1. download + verify BOTH before swapping EITHER.
     let mut payloads: Vec<(&str, Vec<u8>)> = Vec::with_capacity(2);
     for bin in BINARIES {
@@ -221,6 +233,12 @@ fn write_notice(tag: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalized_tag_adds_v_once() {
+        assert_eq!(normalized_tag("0.2.0"), "v0.2.0");
+        assert_eq!(normalized_tag("v0.2.0"), "v0.2.0");
+    }
 
     #[test]
     fn decide_unpinned_newer() {
