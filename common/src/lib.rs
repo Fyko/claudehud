@@ -129,6 +129,38 @@ pub fn find_git_root(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Resolve the actual gitdir for a working-tree root.
+///
+/// For a regular repo this returns `<repo_root>/.git`. For a worktree (where
+/// `.git` is a file containing `gitdir: <abs-or-rel-path>`), follows the
+/// pointer to the per-worktree control directory under
+/// `<mainrepo>/.git/worktrees/<name>`.
+pub fn resolve_gitdir(repo_root: &Path) -> Option<PathBuf> {
+    let dotgit = repo_root.join(".git");
+    if dotgit.is_dir() {
+        return Some(dotgit);
+    }
+    if dotgit.is_file() {
+        let contents = std::fs::read_to_string(&dotgit).ok()?;
+        for line in contents.lines() {
+            if let Some(rest) = line.strip_prefix("gitdir: ") {
+                let candidate = PathBuf::from(rest.trim());
+                let resolved = if candidate.is_absolute() {
+                    candidate
+                } else {
+                    repo_root.join(candidate)
+                };
+                // Silently drop pointers whose target isn't a directory (corrupted/stale worktree)
+                // — the statusline is fail-soft.
+                if resolved.is_dir() {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +226,60 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let root = find_git_root(&cwd);
         assert!(root.is_some());
+    }
+
+    #[test]
+    fn test_resolve_gitdir_regular_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dotgit = tmp.path().join(".git");
+        std::fs::create_dir(&dotgit).unwrap();
+        std::fs::write(dotgit.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+
+        let resolved = resolve_gitdir(tmp.path()).unwrap();
+        assert_eq!(resolved, dotgit);
+        assert!(resolved.join("HEAD").is_file());
+    }
+
+    #[test]
+    fn test_resolve_gitdir_worktree_absolute_pointer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real_gitdir = tmp.path().join("repo/.git/worktrees/wt-one");
+        std::fs::create_dir_all(&real_gitdir).unwrap();
+        std::fs::write(real_gitdir.join("HEAD"), "ref: refs/heads/feature/one\n").unwrap();
+
+        let wt_root = tmp.path().join("wt-one");
+        std::fs::create_dir(&wt_root).unwrap();
+        let pointer = format!("gitdir: {}\n", real_gitdir.display());
+        std::fs::write(wt_root.join(".git"), pointer).unwrap();
+
+        let resolved = resolve_gitdir(&wt_root).unwrap();
+        assert_eq!(resolved, real_gitdir);
+        assert!(resolved.join("HEAD").is_file());
+    }
+
+    #[test]
+    fn test_resolve_gitdir_worktree_relative_pointer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real_gitdir = tmp.path().join("repo/.git/worktrees/wt-one");
+        std::fs::create_dir_all(&real_gitdir).unwrap();
+        std::fs::write(real_gitdir.join("HEAD"), "ref: refs/heads/feature/one\n").unwrap();
+
+        let wt_root = tmp.path().join("wt-one");
+        std::fs::create_dir(&wt_root).unwrap();
+        // Relative path, must be resolved against wt_root.
+        std::fs::write(wt_root.join(".git"), "gitdir: ../repo/.git/worktrees/wt-one\n").unwrap();
+
+        let resolved = resolve_gitdir(&wt_root).unwrap();
+        // Resolved path contains `..` segments since the pointer is relative; compare
+        // canonicalized forms to confirm we landed at the intended directory rather than
+        // some other location that happens to contain a HEAD file.
+        assert_eq!(resolved.canonicalize().unwrap(), real_gitdir.canonicalize().unwrap());
+        assert!(resolved.join("HEAD").is_file(), "resolved gitdir must contain HEAD");
+    }
+
+    #[test]
+    fn test_resolve_gitdir_missing_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(resolve_gitdir(tmp.path()).is_none());
     }
 }
