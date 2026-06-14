@@ -12,6 +12,7 @@
 #   CLAUDEHUD_FORCE_INSTALL=1 Reinstall even if the target version is already present
 #   CLAUDEHUD_SKIP_CHECKSUM=1 Skip .sha256 sidecar verification (debug only)
 #   CLAUDEHUD_VERSION=vX.Y.Z  Pin a specific release tag (default: latest)
+#   CLAUDEHUD_NO_AUTOUPDATE=1  Disable daemon self-update (persisted to config)
 #   CLAUDEHUD_INSTALL_DIR     Custom installation directory (default: ~/.local/bin)
 set -eu
 
@@ -143,6 +144,24 @@ configure_claude() {
 }
 
 # ---------------------------------------------------------------------------
+# write daemon config (autoupdate opt-out + version pin)
+# ---------------------------------------------------------------------------
+# The daemon runs under launchd/systemd and never sees the installing shell's
+# env. Persist the relevant knobs to a file it reads on startup.
+write_config() {
+    # only write when the user actually set something — otherwise defaults apply
+    [ -z "${CLAUDEHUD_VERSION:-}" ] && [ -z "${CLAUDEHUD_NO_AUTOUPDATE:-}" ] && return 0
+
+    cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/claudehud"
+    cfg="$cfg_dir/config"
+    mkdir -p "$cfg_dir"
+    : > "$cfg"
+    [ -n "${CLAUDEHUD_NO_AUTOUPDATE:-}" ] && printf 'autoupdate=false\n' >> "$cfg"
+    [ -n "${CLAUDEHUD_VERSION:-}" ]       && printf 'pin=%s\n' "$CLAUDEHUD_VERSION" >> "$cfg"
+    say "wrote daemon config to $cfg"
+}
+
+# ---------------------------------------------------------------------------
 # start daemon
 # ---------------------------------------------------------------------------
 
@@ -186,10 +205,13 @@ start_daemon_linux() {
     cat > "$svc" <<EOF
 [Unit]
 Description=claudehud git cache daemon
+# autoupdate restarts the unit once per release; don't let that trip the limiter
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=${INSTALL_DIR}/claudehud-daemon
 Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=default.target
@@ -275,6 +297,8 @@ main() {
     fi
 
     configure_claude
+
+    write_config
 
     case "$(uname -s)" in
         Darwin) start_daemon_macos ;;

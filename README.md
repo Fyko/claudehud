@@ -28,6 +28,18 @@ The daemon polls `https://status.claude.com/history.atom` every 5 minutes using 
 
 The daemon stores the current representative incident at `/tmp/clhud-incidents.bin` (408 bytes, seqlock-protected). If the daemon isn't running, the line simply doesn't appear — this degrades silently, like the git cache.
 
+## Autoupdate
+
+The daemon keeps itself current. Roughly every 5 minutes it asks `api.github.com` for the latest release using a conditional GET (so most hits return 304 Not Modified). When a newer release exists, it downloads both binaries, verifies each against its `.sha256` sidecar, swaps them into place, and restarts itself via launchd or systemd. For a few minutes after an update the client shows `updated to vX.Y.Z` under line 1.
+
+Like everything else here, it degrades silently: if the daemon isn't running or a check fails, nothing happens and the installed version stays put.
+
+**Opt out.** Install with `CLAUDEHUD_NO_AUTOUPDATE=1`, or set `autoupdate=false` in `~/.config/claudehud/config`.
+
+**Pin a version.** Install with `CLAUDEHUD_VERSION=vX.Y.Z` (persisted as `pin=vX.Y.Z` in the config). The daemon won't move off a pinned version.
+
+Dev builds never self-update — only release binaries installed outside a `target/` directory do. Windows autoupdate is not yet implemented; the daemon no-ops there.
+
 ## Architecture
 
 Two binaries in a Cargo workspace:
