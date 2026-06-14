@@ -1,3 +1,4 @@
 /target
 /.worktrees
 .claude/scheduled_tasks.lock
+.claude/worktrees
