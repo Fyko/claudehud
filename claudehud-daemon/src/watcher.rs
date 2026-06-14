@@ -87,8 +87,9 @@ mod tests {
     #[test]
     fn test_watcher_updates_cache_on_worktree_head_change() {
         let cache = tempfile::tempdir().unwrap();
-        // SAFETY: this test mutates process env; the test runs serially with
-        // other env-mutating tests in this crate (cargo test is per-process).
+        // This test sets a process-global env var. It's safe TODAY because no
+        // other test in this crate reads CLAUDEHUD_CACHE_DIR — if that changes,
+        // add a serial_test attribute or a shared Mutex guard around env access.
         std::env::set_var("CLAUDEHUD_CACHE_DIR", cache.path());
 
         let tmp = tempfile::tempdir().unwrap();
@@ -111,7 +112,7 @@ mod tests {
         run(&repo, &["worktree", "add", "-q", wt.to_str().unwrap(), "feature/one"]);
 
         let (tx, rx) = unbounded();
-        let _watcher_thread = std::thread::spawn(move || start(rx));
+        let watcher_thread = std::thread::spawn(move || start(rx));
         tx.send(wt.clone()).unwrap();
 
         let bin = mmap_path_in(cache.path(), hash_path(&wt));
@@ -129,7 +130,8 @@ mod tests {
         run(&wt, &["switch", "-q", "feature/two"]);
         assert!(
             wait_for(Duration::from_secs(3), || {
-                let bytes = std::fs::read(&bin).unwrap();
+                let Ok(bytes) = std::fs::read(&bin) else { return false };
+                if bytes.len() < MMAP_SIZE { return false }
                 let mut buf = [0u8; MMAP_SIZE];
                 buf.copy_from_slice(&bytes[..MMAP_SIZE]);
                 let (b, _) = seqlock_read(&buf);
@@ -139,6 +141,7 @@ mod tests {
         );
 
         drop(tx);
+        watcher_thread.join().unwrap();
 
         std::env::remove_var("CLAUDEHUD_CACHE_DIR");
     }
