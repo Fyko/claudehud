@@ -86,6 +86,9 @@ fn render_comfortable(
 ) -> String {
     let mut out = String::with_capacity(512);
 
+    // ── Agent badge (background agents only) ───────────────
+    push_agent_badge(input, &mut out);
+
     // ── Model ──────────────────────────────────────────────
     push_model_full(input, &mut out);
 
@@ -136,6 +139,9 @@ fn render_condensed(
 ) -> String {
     let mut out = String::with_capacity(512);
 
+    // ── Agent badge (background agents only) ───────────────
+    push_agent_badge(input, &mut out);
+
     // ── Model (short) ──────────────────────────────────────
     push_model_short(input, &mut out);
 
@@ -173,6 +179,22 @@ fn render_condensed(
     push_update_notice(update_notice, &mut out);
 
     out
+}
+
+fn push_agent_badge(input: &Input, out: &mut String) {
+    if input.agent_type.is_none() {
+        return;
+    }
+    out.push('🤖');
+    // Future: append agent.name when it's not just "claude".
+    let name = input.agent.as_ref().and_then(|a| a.name.as_deref());
+    if let Some(n) = name {
+        if n != "claude" {
+            out.push(' ');
+            out.push_str(n);
+        }
+    }
+    out.push_str(SEP);
 }
 
 fn push_model_short(input: &Input, out: &mut String) {
@@ -1618,5 +1640,46 @@ mod tests {
         );
         assert!(!condensed.contains("💰"));
         assert!(condensed.contains("5h"));
+    }
+
+    #[test]
+    fn test_render_agent_badge_present_when_agent_type_set() {
+        let json = r#"{
+            "cwd": "/tmp",
+            "agent": {"name": "claude"},
+            "agent_type": "claude",
+            "model": {"display_name": "Opus 4.7"}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = strip_ansi(&render(
+            &input, None, &[], 0, None,
+            RoundingMode::default(), Layout::Comfortable,
+        ));
+        assert!(out.starts_with("🤖"), "agent badge should be leftmost segment, got: {out:?}");
+    }
+
+    #[test]
+    fn test_render_no_agent_badge_when_agent_type_absent() {
+        let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
+        let out = strip_ansi(&render(
+            &input, None, &[], 0, None,
+            RoundingMode::default(), Layout::Comfortable,
+        ));
+        assert!(!out.contains("🤖"), "no agent badge for foreground sessions, got: {out:?}");
+    }
+
+    #[test]
+    fn test_render_agent_badge_in_condensed_layout() {
+        let json = r#"{
+            "cwd": "/tmp",
+            "agent_type": "claude",
+            "model": {"display_name": "Opus 4.7"}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = strip_ansi(&render(
+            &input, None, &[], 0, None,
+            RoundingMode::default(), Layout::Condensed,
+        ));
+        assert!(out.starts_with("🤖"), "agent badge in condensed layout, got: {out:?}");
     }
 }
