@@ -9,6 +9,7 @@ edition = "2021"
 [workspace.dependencies]
 common = { path = "common" }
 memmap2 = "0.9"
+serde_json = "1"
 
 [profile.release]
 opt-level = 3
