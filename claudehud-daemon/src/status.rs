@@ -19,53 +19,28 @@ pub fn start() {
         .timeout_read(Duration::from_secs(10))
         .build();
 
-    let mut etag: Option<String> = None;
-
-    loop {
-        match fetch_once(&agent, etag.as_deref()) {
-            Ok(FetchOutcome::NotModified) => {}
-            Ok(FetchOutcome::Body {
-                body,
-                etag: new_etag,
-            }) => {
-                etag = new_etag;
-                match parse_atom_result(&body) {
-                    Ok((incidents, total)) => {
-                        write_incidents_to_path(&incidents_path(), &incidents, total);
-                    }
-                    Err(e) => eprintln!("WARN status parse: {e}"),
-                }
-            }
-            Err(e) => {
-                eprintln!("WARN status fetch: {e}");
-            }
-        }
-        std::thread::sleep(POLL_INTERVAL);
-    }
+    let source = crate::poll::UreqSource::new(agent, FEED_URL);
+    run_status_poll(&source, &crate::poll::RealClock, POLL_INTERVAL);
 }
 
-enum FetchOutcome {
-    NotModified,
-    Body { body: String, etag: Option<String> },
-}
-
-fn fetch_once(agent: &ureq::Agent, etag: Option<&str>) -> Result<FetchOutcome, String> {
-    let mut req = agent.get(FEED_URL);
-    if let Some(tag) = etag {
-        req = req.set("If-None-Match", tag);
-    }
-    match req.call() {
-        Ok(resp) => {
-            let new_etag = resp.header("ETag").map(|s| s.to_string());
-            let body = resp.into_string().map_err(|e| e.to_string())?;
-            Ok(FetchOutcome::Body {
-                body,
-                etag: new_etag,
-            })
+/// The incident-poll adapter over the shared poll loop: on each fresh body,
+/// parse the Atom feed and write the active incidents to the mmap. A parse
+/// failure is logged and the prior mmap state is retained (per ADR-0001); the
+/// `run_poll_loop` shape handles fetch errors and 304s the same way for both
+/// pollers.
+fn run_status_poll<S, C>(source: &S, clock: &C, interval: Duration)
+where
+    S: crate::poll::ConditionalGet,
+    C: crate::poll::Clock,
+{
+    crate::poll::run_poll_loop(source, clock, "status", None, interval, |body| {
+        match parse_atom_result(body) {
+            Ok((incidents, total)) => {
+                write_incidents_to_path(&incidents_path(), &incidents, total);
+            }
+            Err(e) => eprintln!("WARN status parse: {e}"),
         }
-        Err(ureq::Error::Status(304, _)) => Ok(FetchOutcome::NotModified),
-        Err(e) => Err(e.to_string()),
-    }
+    });
 }
 
 pub(crate) fn write_incidents_to_path(path: &Path, incidents: &[Incident], total: u8) {
