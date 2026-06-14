@@ -15,7 +15,7 @@ common = { workspace = true }
 memmap2 = { workspace = true }
 pico-args = "0.5"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
 time = { version = "0.3", features = ["local-offset"] }
 
 [dev-dependencies]

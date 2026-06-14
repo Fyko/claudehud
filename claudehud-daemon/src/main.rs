@@ -8,6 +8,7 @@
 mod cache;
 mod registrar;
 mod status;
+mod update;
 mod watcher;
 
 use std::path::PathBuf;
@@ -57,6 +58,10 @@ fn main() -> ExitCode {
 
     std::thread::spawn(|| {
         status::start();
+    });
+
+    std::thread::spawn(|| {
+        update::start();
     });
 
     // watcher::start runs the main event loop — blocks until channel closes

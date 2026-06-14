@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use claudehud::render::RoundingMode;
-use claudehud::{git, incidents, input, install, render, update};
+use claudehud::{git, incidents, input, install, notice, render, update};
 
 const HELP: &str = "\
 claudehud — statusline renderer for Claude Code
@@ -130,9 +130,18 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
         .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
 
     let (incidents, total_active) = incidents::read_incidents();
+    let update_notice = notice::active_notice();
     print!(
         "{}",
-        render::render(&input, git, &incidents, total_active, rounding, layout)
+        render::render(
+            &input,
+            git,
+            &incidents,
+            total_active,
+            update_notice.as_deref(),
+            rounding,
+            layout
+        )
     );
     ExitCode::SUCCESS
 }

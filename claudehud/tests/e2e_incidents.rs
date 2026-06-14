@@ -88,6 +88,7 @@ fn test_e2e_single_ongoing_incident() {
         None,
         &read_back,
         total,
+        None,
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
     );
@@ -140,6 +141,7 @@ fn test_e2e_two_ongoing_incidents() {
         None,
         &read_back,
         total,
+        None,
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
     );
@@ -181,6 +183,7 @@ fn test_e2e_overflow_shows_plus_n_more() {
         None,
         &read_back,
         total,
+        None,
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
     );
@@ -205,6 +208,7 @@ fn test_e2e_no_incident_mmap_absent() {
         None,
         &incidents,
         total,
+        None,
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
     );
