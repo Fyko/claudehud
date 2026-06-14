@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::input::Input;
 use common::{
-    hash_path, mmap_path, read_git_status, seqlock_read, watch_dir, watch_path, MMAP_SIZE,
+    cache_dir, hash_path, mmap_path, read_git_status, seqlock_read, watch_path_in, MMAP_SIZE,
 };
 use memmap2::Mmap;
 
@@ -20,7 +20,7 @@ pub fn branch_and_dirty(cwd: &Path) -> Option<(String, bool)> {
     }
 
     // ── Slow path: register + direct git ─────────────────
-    register(cwd, hash);
+    ensure_registered_for_watching(cwd, hash);
     read_git_status(cwd)
 }
 
@@ -65,9 +65,28 @@ fn try_mmap_read(hash: u32) -> Option<(String, bool)> {
     }
 }
 
-fn register(cwd: &Path, hash: u32) {
-    let _ = fs::create_dir_all(watch_dir());
-    if let Ok(mut f) = fs::File::create(watch_path(hash)) {
+/// Ensure this repo is registered for watching by the daemon.
+///
+/// Writes the **registration marker** under `watch_dir()` keyed by `hash`; the
+/// daemon watches that directory and starts maintaining this repo's **cache
+/// file** once the marker appears. This is the one side effect that wires a
+/// freshly-seen `cwd` into the daemon's fast path, so it is a named step rather
+/// than an invisible consequence of branch resolution: deleting it silently
+/// breaks daemon registration. Degrades silently (ADR-0001): any I/O error just
+/// means the repo isn't registered this render.
+pub fn ensure_registered_for_watching(cwd: &Path, hash: u32) {
+    ensure_registered_in(&cache_dir(), cwd, hash);
+}
+
+/// Test seam: write the registration marker under an explicit cache root,
+/// avoiding the real `/tmp` (and a process-global `CLAUDEHUD_CACHE_DIR` env
+/// mutation) so the marker write can be asserted in isolation.
+fn ensure_registered_in(root: &Path, cwd: &Path, hash: u32) {
+    let marker = watch_path_in(root, hash);
+    if let Some(parent) = marker.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = fs::File::create(marker) {
         let _ = f.write_all(cwd.as_os_str().as_encoded_bytes());
     }
 }
@@ -152,6 +171,28 @@ mod tests {
     fn test_branch_and_dirty_not_git() {
         let result = branch_and_dirty(Path::new("/tmp"));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_ensure_registered_writes_marker_for_unwatched_repo() {
+        // An un-watched repo: the cache root has no marker yet. The named
+        // registration step must create it (cwd encoded as the contents) so the
+        // daemon picks the repo up. No real /tmp, no env mutation.
+        let root = tempfile::tempdir().unwrap();
+        let cwd = Path::new("/some/unwatched/repo");
+        let hash = common::hash_path(cwd);
+        let marker = common::watch_path_in(root.path(), hash);
+        assert!(!marker.exists(), "precondition: repo is un-watched");
+
+        ensure_registered_in(root.path(), cwd, hash);
+
+        assert!(marker.exists(), "registration marker must be written");
+        let contents = std::fs::read(&marker).unwrap();
+        assert_eq!(
+            contents,
+            cwd.as_os_str().as_encoded_bytes(),
+            "marker holds the cwd so the daemon knows which repo to watch"
+        );
     }
 
     #[test]

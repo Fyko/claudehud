@@ -4,6 +4,7 @@ pub mod incidents;
 pub mod input;
 pub mod install;
 pub mod notice;
+pub mod orchestrate;
 pub mod render;
 pub mod time;
 pub mod update;
