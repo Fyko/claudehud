@@ -152,4 +152,3 @@ fn fetch(url: &str) -> io::Result<Vec<u8>> {
     }
     Ok(wget.stdout)
 }
-

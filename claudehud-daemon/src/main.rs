@@ -60,6 +60,10 @@ fn main() -> ExitCode {
         status::start();
     });
 
+    std::thread::spawn(|| {
+        update::start();
+    });
+
     // watcher::start runs the main event loop — blocks until channel closes
     watcher::start(rx);
 

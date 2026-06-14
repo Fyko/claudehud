@@ -56,8 +56,12 @@ pub fn start() {
     if !cfg.autoupdate {
         return;
     }
-    let Some(target) = target_triple() else { return };
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(target) = target_triple() else {
+        return;
+    };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
     if !is_installed_path(&exe) {
         return;
     }
@@ -161,13 +165,22 @@ fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, String> {
 }
 
 fn download_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {
-    agent.get(url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())
+    agent
+        .get(url)
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_string()
+        .map_err(|e| e.to_string())
 }
 
 fn verify_sha256(bytes: &[u8], expected_hex: &str) -> bool {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    let actual: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let actual: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     !expected_hex.is_empty() && actual.eq_ignore_ascii_case(expected_hex)
 }
 
@@ -192,7 +205,9 @@ fn swap_binary(install_dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<
 
 fn write_notice(tag: &str) {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else { return };
+    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+        return;
+    };
     let notice = common::notice::Notice {
         version: tag.trim_start_matches('v').to_string(),
         show_until: now.as_secs() + 300,
@@ -209,7 +224,10 @@ mod tests {
 
     #[test]
     fn decide_unpinned_newer() {
-        assert_eq!(decide_target("0.1.0", "v0.2.0", None), Some("v0.2.0".into()));
+        assert_eq!(
+            decide_target("0.1.0", "v0.2.0", None),
+            Some("v0.2.0".into())
+        );
     }
 
     #[test]
@@ -219,7 +237,10 @@ mod tests {
 
     #[test]
     fn decide_pinned_targets_pin_not_latest() {
-        assert_eq!(decide_target("0.1.0", "v0.3.0", Some("v0.2.0")), Some("v0.2.0".into()));
+        assert_eq!(
+            decide_target("0.1.0", "v0.3.0", Some("v0.2.0")),
+            Some("v0.2.0".into())
+        );
     }
 
     #[test]
@@ -229,8 +250,12 @@ mod tests {
 
     #[test]
     fn installed_path_rejects_target_dir() {
-        assert!(!is_installed_path(Path::new("/home/u/claudehud/target/release/claudehud-daemon")));
-        assert!(is_installed_path(Path::new("/home/u/.local/bin/claudehud-daemon")));
+        assert!(!is_installed_path(Path::new(
+            "/home/u/claudehud/target/release/claudehud-daemon"
+        )));
+        assert!(is_installed_path(Path::new(
+            "/home/u/.local/bin/claudehud-daemon"
+        )));
     }
 
     #[test]
@@ -252,6 +277,9 @@ mod tests {
         let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
         assert!(verify_sha256(b"abc", expected));
         assert!(!verify_sha256(b"abc", "deadbeef"));
-        assert!(!verify_sha256(b"abc", ""), "empty expected hex must fail closed");
+        assert!(
+            !verify_sha256(b"abc", ""),
+            "empty expected hex must fail closed"
+        );
     }
 }

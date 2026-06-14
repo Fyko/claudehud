@@ -13,13 +13,19 @@ pub enum VersionState {
 /// Parse the `tag_name` field out of a GitHub release JSON body.
 pub fn parse_tag(body: &[u8]) -> io::Result<String> {
     let v: serde_json::Value = serde_json::from_slice(body).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("bad JSON from GitHub: {e}"))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("bad JSON from GitHub: {e}"),
+        )
     })?;
     v.get("tag_name")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "GitHub response had no tag_name")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "GitHub response had no tag_name",
+            )
         })
 }
 
@@ -83,24 +89,42 @@ mod tests {
 
     #[test]
     fn compare_installed_older() {
-        assert_eq!(compare("0.1.0", "v0.2.0"), VersionState::Newer("0.2.0".into()));
-        assert_eq!(compare("0.1.9", "v0.1.10"), VersionState::Newer("0.1.10".into()));
+        assert_eq!(
+            compare("0.1.0", "v0.2.0"),
+            VersionState::Newer("0.2.0".into())
+        );
+        assert_eq!(
+            compare("0.1.9", "v0.1.10"),
+            VersionState::Newer("0.1.10".into())
+        );
     }
 
     #[test]
     fn compare_installed_ahead() {
-        assert_eq!(compare("0.2.0", "v0.1.0"), VersionState::Ahead("0.1.0".into()));
+        assert_eq!(
+            compare("0.2.0", "v0.1.0"),
+            VersionState::Ahead("0.1.0".into())
+        );
     }
 
     #[test]
     fn compare_prerelease_is_less_than_release() {
-        assert_eq!(compare("0.1.0-alpha.4", "v0.1.0"), VersionState::Newer("0.1.0".into()));
-        assert_eq!(compare("0.1.0", "v0.1.0-alpha.4"), VersionState::Ahead("0.1.0-alpha.4".into()));
+        assert_eq!(
+            compare("0.1.0-alpha.4", "v0.1.0"),
+            VersionState::Newer("0.1.0".into())
+        );
+        assert_eq!(
+            compare("0.1.0", "v0.1.0-alpha.4"),
+            VersionState::Ahead("0.1.0-alpha.4".into())
+        );
     }
 
     #[test]
     fn compare_unparseable_falls_back_to_string_eq() {
         assert_eq!(compare("weird", "weird"), VersionState::UpToDate);
-        assert_eq!(compare("weird", "other"), VersionState::Newer("other".into()));
+        assert_eq!(
+            compare("weird", "other"),
+            VersionState::Newer("other".into())
+        );
     }
 }

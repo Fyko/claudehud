@@ -29,7 +29,10 @@ pub fn parse_notice(text: &str) -> Option<Notice> {
         return None;
     }
     let show_until = lines.next()?.trim().parse::<u64>().ok()?;
-    Some(Notice { version, show_until })
+    Some(Notice {
+        version,
+        show_until,
+    })
 }
 
 #[cfg(test)]
@@ -38,7 +41,10 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let n = Notice { version: "0.2.0".into(), show_until: 1_700_000_300 };
+        let n = Notice {
+            version: "0.2.0".into(),
+            show_until: 1_700_000_300,
+        };
         assert_eq!(parse_notice(&format_notice(&n)), Some(n));
     }
 

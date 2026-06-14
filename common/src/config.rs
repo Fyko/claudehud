@@ -12,7 +12,10 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { autoupdate: true, pin: None }
+        Config {
+            autoupdate: true,
+            pin: None,
+        }
     }
 }
 
@@ -26,7 +29,10 @@ pub fn config_path() -> PathBuf {
             return PathBuf::from(xdg).join("claudehud").join("config");
         }
         if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(".config").join("claudehud").join("config");
+            return PathBuf::from(home)
+                .join(".config")
+                .join("claudehud")
+                .join("config");
         }
         PathBuf::new()
     }
@@ -53,7 +59,9 @@ pub fn parse(text: &str) -> Config {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let Some((k, v)) = line.split_once('=') else { continue };
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
         let (k, v) = (k.trim(), v.trim());
         match k {
             "autoupdate" => cfg.autoupdate = !matches!(v, "false" | "0" | "no" | "off"),
