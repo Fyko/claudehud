@@ -62,12 +62,17 @@ pub fn render(
     git: Option<(String, bool)>,
     incidents: &[Incident],
     total_active: u8,
+    update_notice: Option<&str>,
     rounding: RoundingMode,
     layout: Layout,
 ) -> String {
     match layout {
-        Layout::Comfortable => render_comfortable(input, git, incidents, total_active, rounding),
-        Layout::Condensed => render_condensed(input, git, incidents, total_active, rounding),
+        Layout::Comfortable => {
+            render_comfortable(input, git, incidents, total_active, update_notice, rounding)
+        }
+        Layout::Condensed => {
+            render_condensed(input, git, incidents, total_active, update_notice, rounding)
+        }
     }
 }
 
@@ -76,6 +81,7 @@ fn render_comfortable(
     git: Option<(String, bool)>,
     incidents: &[Incident],
     total_active: u8,
+    update_notice: Option<&str>,
     rounding: RoundingMode,
 ) -> String {
     let mut out = String::with_capacity(512);
@@ -96,6 +102,7 @@ fn render_comfortable(
 
     // ── Incident lines (between line 1 and rate limits) ────
     push_incidents(incidents, total_active, true, &mut out);
+    push_update_notice(update_notice, &mut out);
 
     // ── Rate limits ────────────────────────────────────────
     if let Some(rl) = &input.rate_limits {
@@ -124,6 +131,7 @@ fn render_condensed(
     git: Option<(String, bool)>,
     incidents: &[Incident],
     total_active: u8,
+    update_notice: Option<&str>,
     rounding: RoundingMode,
 ) -> String {
     let mut out = String::with_capacity(512);
@@ -162,6 +170,7 @@ fn render_condensed(
 
     // ── Incidents ──────────────────────────────────────────
     push_incidents(incidents, total_active, false, &mut out);
+    push_update_notice(update_notice, &mut out);
 
     out
 }
@@ -339,6 +348,17 @@ fn push_jail_line(inc: &Incident, now: u64, out: &mut String) {
     out.push_str("\x1b]8;;\x1b\\");
 }
 
+/// One-shot "updated to vX" line, shown under line 1 for a few minutes after a
+/// daemon self-update. Its own line, like an incident.
+fn push_update_notice(version: Option<&str>, out: &mut String) {
+    let Some(v) = version else { return };
+    out.push('\n');
+    out.push_str(DIM);
+    out.push_str("updated to v");
+    out.push_str(v);
+    out.push_str(RESET);
+}
+
 fn push_incident_line(inc: &Incident, now: u64, out: &mut String) {
     let url = &inc.url;
     let elapsed = now.saturating_sub(inc.started_at);
@@ -473,6 +493,37 @@ mod tests {
     }
 
     #[test]
+    fn test_render_update_notice_present() {
+        let input = Input::default();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            Some("0.2.0"),
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("updated to v0.2.0"), "got: {plain:?}");
+    }
+
+    #[test]
+    fn test_render_no_update_notice_absent() {
+        let input = Input::default();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        assert!(!strip_ansi(&out).contains("updated to"));
+    }
+
+    #[test]
     fn test_render_default_model() {
         let input = Input::default();
         let result = render(
@@ -480,6 +531,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -499,6 +551,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -519,6 +572,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -533,6 +587,7 @@ mod tests {
             Some(("main".to_string(), false)),
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -547,6 +602,7 @@ mod tests {
             Some(("main".to_string(), true)),
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -562,6 +618,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -582,6 +639,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -613,6 +671,7 @@ mod tests {
             None,
             &[incident],
             1,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -646,6 +705,7 @@ mod tests {
             None,
             &[incident],
             3,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -679,6 +739,7 @@ mod tests {
             None,
             &incidents,
             2,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -697,6 +758,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -738,6 +800,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -771,6 +834,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -793,6 +857,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable
         ))
@@ -802,6 +867,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Ceiling,
             Layout::Comfortable
         ))
@@ -811,6 +877,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Nearest,
             Layout::Comfortable
         ))
@@ -838,7 +905,15 @@ mod tests {
     #[test]
     fn test_render_default_model_condensed() {
         let input = Input::default();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"), "default model name should render");
     }
@@ -852,6 +927,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         ));
@@ -871,6 +947,7 @@ mod tests {
             Some(("main".to_string(), false)),
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         ));
@@ -893,7 +970,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
 
         assert!(plain.contains("5h"), "5h label should render");
@@ -937,6 +1022,7 @@ mod tests {
             None,
             &[incident],
             1,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         );
@@ -976,6 +1062,7 @@ mod tests {
             None,
             &[inc],
             1,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -1002,6 +1089,7 @@ mod tests {
             None,
             &[inc],
             1,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         );
@@ -1029,6 +1117,7 @@ mod tests {
             None,
             &[inc],
             1,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -1052,6 +1141,7 @@ mod tests {
             None,
             &[inc],
             1,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         );
@@ -1073,6 +1163,7 @@ mod tests {
                 None,
                 &[inc],
                 1,
+                None,
                 RoundingMode::Floor,
                 layout,
             );
@@ -1114,6 +1205,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         ));
@@ -1123,7 +1215,15 @@ mod tests {
     #[test]
     fn test_render_condensed_no_rate_limits() {
         let input = Input::default();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"));
         assert!(!plain.contains("5h"));
@@ -1139,7 +1239,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("5h"));
         assert!(plain.contains("9%"));
@@ -1154,7 +1262,15 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let result = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&result);
         assert!(plain.contains("7d"));
         assert!(plain.contains("12%"));
@@ -1169,6 +1285,7 @@ mod tests {
             Some(("main".to_string(), true)),
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         );
@@ -1197,6 +1314,7 @@ mod tests {
             None,
             &[incident],
             3,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         );
@@ -1208,7 +1326,15 @@ mod tests {
     #[test]
     fn test_render_real_stdin_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
         assert!(
@@ -1244,6 +1370,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -1261,6 +1388,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -1280,6 +1408,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         ));
@@ -1296,6 +1425,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -1310,6 +1440,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -1327,6 +1458,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -1340,6 +1472,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -1353,6 +1486,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -1366,6 +1500,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -1380,6 +1515,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         );
@@ -1400,7 +1536,15 @@ mod tests {
     #[test]
     fn test_render_api_billing_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"));
         assert!(plain.contains("$0.10"));
@@ -1413,7 +1557,15 @@ mod tests {
     fn test_render_cost_condensed_single_line() {
         let json = r#"{"cost": {"total_cost_usd": 0.42}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(&input, None, &[], 0, RoundingMode::Floor, Layout::Condensed);
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
         assert!(
             !out.contains('\n'),
             "condensed layout must stay single-line"
@@ -1439,6 +1591,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Comfortable,
         ));
@@ -1455,6 +1608,7 @@ mod tests {
             None,
             &[],
             0,
+            None,
             RoundingMode::Floor,
             Layout::Condensed,
         ));
