@@ -66,6 +66,20 @@ pub fn format_duration(secs: u64) -> String {
     }
 }
 
+/// Coarse, day-aware duration for long-lived things (e.g. an incident's age).
+/// `1d 4h` / `23h` / `45m` / `30s`.
+pub fn format_long_duration(secs: u64) -> String {
+    if secs >= 86_400 {
+        format!("{}d {}h", secs / 86_400, (secs % 86_400) / 3600)
+    } else if secs >= 3600 {
+        format!("{}h", secs / 3600)
+    } else if secs >= 60 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}s", secs)
+    }
+}
+
 /// Format epoch as local time.
 pub fn format_reset_time(epoch: u64, style: ResetStyle) -> String {
     use time::{OffsetDateTime, UtcOffset};
@@ -160,5 +174,16 @@ mod tests {
         assert_eq!(format_duration(3600), "1h0m");
         assert_eq!(format_duration(3661), "1h1m");
         assert_eq!(format_duration(7384), "2h3m");
+    }
+
+    #[test]
+    fn test_format_long_duration() {
+        assert_eq!(format_long_duration(30), "30s");
+        assert_eq!(format_long_duration(45 * 60), "45m");
+        assert_eq!(format_long_duration(23 * 3600), "23h");
+        // 1d 4h = 100800s
+        assert_eq!(format_long_duration(100_800), "1d 4h");
+        // exactly 24h rolls over to days, drops the trailing 0h
+        assert_eq!(format_long_duration(86_400), "1d 0h");
     }
 }
