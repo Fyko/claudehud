@@ -11,3 +11,6 @@ crossbeam-channel = "0.5"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 roxmltree = "0.20"
 sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
