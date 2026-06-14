@@ -86,6 +86,9 @@ fn render_comfortable(
 ) -> String {
     let mut out = String::with_capacity(512);
 
+    // ── Agent badge (background agents only) ───────────────
+    push_agent_badge(input, &mut out);
+
     // ── Model ──────────────────────────────────────────────
     push_model_full(input, &mut out);
 
@@ -136,6 +139,9 @@ fn render_condensed(
 ) -> String {
     let mut out = String::with_capacity(512);
 
+    // ── Agent badge (background agents only) ───────────────
+    push_agent_badge(input, &mut out);
+
     // ── Model (short) ──────────────────────────────────────
     push_model_short(input, &mut out);
 
@@ -173,6 +179,22 @@ fn render_condensed(
     push_update_notice(update_notice, &mut out);
 
     out
+}
+
+fn push_agent_badge(input: &Input, out: &mut String) {
+    if input.agent_type.is_none() {
+        return;
+    }
+    out.push('🤖');
+    // Future: append agent.name when it's not just "claude".
+    let name = input.agent.as_ref().and_then(|a| a.name.as_deref());
+    if let Some(n) = name {
+        if n != "claude" {
+            out.push(' ');
+            out.push_str(n);
+        }
+    }
+    out.push_str(SEP);
 }
 
 fn push_model_short(input: &Input, out: &mut String) {
@@ -232,11 +254,16 @@ fn push_context(input: &Input, rounding: RoundingMode, out: &mut String) {
 
 fn push_dir_branch(input: &Input, git: Option<&(String, bool)>, tight: bool, out: &mut String) {
     let cwd = input.cwd.as_deref().unwrap_or("");
-    let dirname = Path::new(cwd)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(cwd);
+    let cwd_path = Path::new(cwd);
+    let dirname = cwd_path.file_name().and_then(|n| n.to_str()).unwrap_or(cwd);
+    let base_repo = crate::git::resolve_base_repo(input, cwd_path);
     out.push_str(CYAN);
+    if let Some(ref base) = base_repo {
+        if base.as_str() != dirname {
+            out.push_str(base);
+            out.push('/');
+        }
+    }
     out.push_str(dirname);
     out.push_str(RESET);
     if let Some((branch, dirty)) = git {
@@ -1618,5 +1645,124 @@ mod tests {
         );
         assert!(!condensed.contains("💰"));
         assert!(condensed.contains("5h"));
+    }
+
+    #[test]
+    fn test_render_agent_badge_present_when_agent_type_set() {
+        let json = r#"{
+            "cwd": "/tmp",
+            "agent": {"name": "claude"},
+            "agent_type": "claude",
+            "model": {"display_name": "Opus 4.7"}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
+        ));
+        assert!(
+            out.starts_with("🤖"),
+            "agent badge should be leftmost segment, got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn test_render_no_agent_badge_when_agent_type_absent() {
+        let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
+        let out = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
+        ));
+        assert!(
+            !out.contains("🤖"),
+            "no agent badge for foreground sessions, got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn test_render_agent_badge_in_condensed_layout() {
+        let json = r#"{
+            "cwd": "/tmp",
+            "agent_type": "claude",
+            "model": {"display_name": "Opus 4.7"}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let out = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Condensed,
+        ));
+        assert!(
+            out.starts_with("🤖"),
+            "agent badge in condensed layout, got: {out:?}"
+        );
+    }
+
+    // ── resolve_base_repo render integration tests ────────────────────────────
+
+    #[test]
+    fn test_render_dir_segment_prefixes_base_repo_when_payload_has_original_cwd() {
+        // cwd = "/tmp" (not a git repo), original_cwd = "/Users/foo/myproject"
+        // dirname = "tmp", base = "myproject" → they differ, so prefix fires.
+        let json = r#"{
+            "cwd": "/tmp",
+            "worktree": {"original_cwd": "/Users/foo/myproject"}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
+        ));
+        assert!(
+            plain.contains("myproject/tmp"),
+            "prefix should appear when base differs from dirname, got: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn test_render_dir_segment_no_prefix_when_base_matches_dirname() {
+        // cwd = "/Users/foo/myproject", original_cwd = "/Users/foo/myproject"
+        // dirname = "myproject", base = "myproject" → same, collapse fires.
+        let json = r#"{
+            "cwd": "/Users/foo/myproject",
+            "worktree": {"original_cwd": "/Users/foo/myproject"}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
+        ));
+        assert!(
+            plain.contains("myproject"),
+            "dirname should still render, got: {plain:?}"
+        );
+        assert!(
+            !plain.contains("myproject/myproject"),
+            "collapsed case must not double-prefix, got: {plain:?}"
+        );
     }
 }

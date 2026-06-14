@@ -74,6 +74,7 @@ dependencies = [
  "notify",
  "roxmltree",
  "sha2",
+ "tempfile",
  "ureq",
 ]
 
@@ -82,6 +83,7 @@ name = "common"
 version = "0.1.0-alpha.5"
 dependencies = [
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

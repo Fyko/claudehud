@@ -127,7 +127,7 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
         .cwd
         .as_deref()
         .filter(|s| !s.is_empty())
-        .and_then(|cwd| git::branch_and_dirty(Path::new(cwd)));
+        .and_then(|cwd| git::resolve_branch(&input, Path::new(cwd)));
 
     let (incidents, total_active) = incidents::read_incidents();
     let update_notice = notice::active_notice();
