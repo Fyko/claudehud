@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use common::version::{compare, VersionState};
+use sha2::{Digest, Sha256};
 
 const RELEASES_API: &str = "https://api.github.com/repos/fyko/claudehud/releases/latest";
 const USER_AGENT: &str = concat!("claudehud-daemon/", env!("CARGO_PKG_VERSION"));
@@ -114,8 +115,6 @@ fn fetch_latest_tag(
     }
 }
 
-use sha2::{Digest, Sha256};
-
 const BASE_URL: &str = "https://github.com/fyko/claudehud/releases/download";
 const BINARIES: [&str; 2] = ["claudehud", "claudehud-daemon"];
 
@@ -183,7 +182,10 @@ fn swap_binary(install_dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+        if let Err(e) = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
     }
     std::fs::rename(&tmp, &dest)
 }
@@ -250,5 +252,6 @@ mod tests {
         let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
         assert!(verify_sha256(b"abc", expected));
         assert!(!verify_sha256(b"abc", "deadbeef"));
+        assert!(!verify_sha256(b"abc", ""), "empty expected hex must fail closed");
     }
 }
