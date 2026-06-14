@@ -28,20 +28,21 @@ pub fn branch_and_dirty(cwd: &Path) -> Option<(String, bool)> {
 ///
 /// Precedence:
 ///   1. `input.worktree.original_branch` — CC has already told us the branch
-///      the user originated from; skip git introspection entirely.
-///   2. `branch_and_dirty(cwd)` — derive from disk.
+///      the user originated from; we still go through `branch_and_dirty` for
+///      the dirty flag so the daemon learns about this cwd (writes the watch
+///      marker, hits the mmap fast path on subsequent renders) and only
+///      override the branch text with the payload-supplied value.
+///   2. `branch_and_dirty(cwd)` — derive everything from disk.
 ///
-/// When precedence (1) fires, dirty is derived from cwd's `git status` (still
-/// works in worktrees) and falls back to `false` when git is unavailable.
+/// When `branch_and_dirty` returns `None` under precedence (1) — cwd isn't in
+/// a git repo at all — we still surface the payload branch with `dirty = false`.
 pub fn resolve_branch(input: &Input, cwd: &Path) -> Option<(String, bool)> {
     if let Some(branch) = input
         .worktree
         .as_ref()
         .and_then(|w| w.original_branch.as_deref())
     {
-        let dirty = common::read_git_status(cwd)
-            .map(|(_, d)| d)
-            .unwrap_or(false);
+        let dirty = branch_and_dirty(cwd).map(|(_, d)| d).unwrap_or(false);
         return Some((branch.to_string(), dirty));
     }
     branch_and_dirty(cwd)
@@ -79,13 +80,14 @@ fn register(cwd: &Path, hash: u32) {
 /// basename is returned immediately — CC already knows the real repo root.
 ///
 /// **Path B (gitdir introspection):** otherwise, walk up to the git root and
-/// resolve the gitdir. If `<gitdir>/commondir` exists (worktree case), read
-/// that file and resolve it relative to the gitdir; the parent of the resolved
-/// path is the main repo's `.git` dir, and its parent's basename is the repo
-/// name. If `commondir` is absent (regular repo), `<gitdir>.parent()` is the
-/// repo root and its basename is returned.
+/// resolve the gitdir. Only worktrees get a prefix — if `<gitdir>/commondir`
+/// exists, read that file, resolve it relative to the gitdir, and return the
+/// main repo's basename. For regular repos (no `commondir`) we return `None`
+/// so the dir segment renders as-was (no `repo/subdir` regression on
+/// foreground renders from a repo subdirectory).
 ///
-/// Returns `None` when cwd is not in a git repo.
+/// Returns `None` when cwd is not in a git repo OR when it's in a regular
+/// (non-worktree) repo.
 pub fn resolve_base_repo(input: &Input, cwd: &Path) -> Option<String> {
     // Path A: payload takes precedence.
     if let Some(original_cwd) = input
@@ -104,34 +106,31 @@ pub fn resolve_base_repo(input: &Input, cwd: &Path) -> Option<String> {
     let gitdir = common::resolve_gitdir(&git_root)?;
 
     let commondir_path = gitdir.join("commondir");
-    if commondir_path.exists() {
-        // We're in a linked worktree. `commondir` contains a relative (or
-        // absolute) path from `gitdir` to the common gitdir.
-        let contents = std::fs::read_to_string(&commondir_path).ok()?;
-        let pointer = contents.trim();
-        let common_gitdir = {
-            let p = Path::new(pointer);
-            if p.is_absolute() {
-                p.to_path_buf()
-            } else {
-                gitdir.join(p)
-            }
-        };
-        let resolved = common_gitdir.canonicalize().ok()?;
-        // resolved is the main .git dir; its parent is the repo root.
-        resolved
-            .parent()?
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|s| s.to_string())
-    } else {
-        // Regular repo: gitdir == <repo_root>/.git, so gitdir.parent() is the repo root.
-        gitdir
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .map(|s| s.to_string())
+    if !commondir_path.exists() {
+        // Regular (non-worktree) repo — no prefix. Without this guard,
+        // foreground renders from a subdirectory (cwd=/repo/src) would
+        // regress from `src (branch)` to `repo/src (branch)`.
+        return None;
     }
+    // Linked worktree. `commondir` contains a relative (or absolute) path
+    // from `gitdir` to the common gitdir.
+    let contents = std::fs::read_to_string(&commondir_path).ok()?;
+    let pointer = contents.trim();
+    let common_gitdir = {
+        let p = Path::new(pointer);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            gitdir.join(p)
+        }
+    };
+    let resolved = common_gitdir.canonicalize().ok()?;
+    // resolved is the main .git dir; its parent is the repo root.
+    resolved
+        .parent()?
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
 }
 
 #[cfg(test)]
@@ -248,7 +247,10 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_base_repo_returns_repo_basename_in_regular_repo() {
+    fn test_resolve_base_repo_returns_none_in_regular_repo() {
+        // Regular (non-worktree) repos return None so the render layer
+        // doesn't add a prefix that would regress foreground subdirectory
+        // renders (cwd=/repo/src would otherwise become `repo/src`).
         use std::process::Command;
 
         let tmp = tempfile::tempdir().unwrap();
@@ -274,10 +276,42 @@ mod tests {
 
         let input: crate::input::Input = serde_json::from_str("{}").unwrap();
         let result = resolve_base_repo(&input, &repo);
+        assert_eq!(result, None, "regular repo should not produce a prefix");
+    }
+
+    #[test]
+    fn test_resolve_base_repo_returns_none_from_subdir_of_regular_repo() {
+        // Regression guard: rendering from /repo/src in a regular repo must
+        // NOT produce a `repo/src` prefix.
+        use std::process::Command;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("myrepo");
+        let subdir = repo.join("src");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let run = |cwd: &std::path::Path, args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("git failed to start");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        run(&repo, &["init", "-q", "-b", "main"]);
+        run(&repo, &["config", "user.email", "t@t"]);
+        run(&repo, &["config", "user.name", "t"]);
+
+        let input: crate::input::Input = serde_json::from_str("{}").unwrap();
+        let result = resolve_base_repo(&input, &subdir);
         assert_eq!(
-            result,
-            Some("myregularepo".to_string()),
-            "regular repo should return its own basename"
+            result, None,
+            "subdir of a regular repo must not get a `repo/` prefix"
         );
     }
 }
