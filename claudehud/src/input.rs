@@ -354,7 +354,10 @@ mod tests {
             input.agent.as_ref().and_then(|a| a.name.as_deref()),
             Some("claude")
         );
-        assert!(input.worktree.is_none(), "non-native-worktree bg payload has no worktree block");
+        assert!(
+            input.worktree.is_none(),
+            "non-native-worktree bg payload has no worktree block"
+        );
     }
 
     #[test]

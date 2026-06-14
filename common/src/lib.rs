@@ -268,14 +268,24 @@ mod tests {
         let wt_root = tmp.path().join("wt-one");
         std::fs::create_dir(&wt_root).unwrap();
         // Relative path, must be resolved against wt_root.
-        std::fs::write(wt_root.join(".git"), "gitdir: ../repo/.git/worktrees/wt-one\n").unwrap();
+        std::fs::write(
+            wt_root.join(".git"),
+            "gitdir: ../repo/.git/worktrees/wt-one\n",
+        )
+        .unwrap();
 
         let resolved = resolve_gitdir(&wt_root).unwrap();
         // Resolved path contains `..` segments since the pointer is relative; compare
         // canonicalized forms to confirm we landed at the intended directory rather than
         // some other location that happens to contain a HEAD file.
-        assert_eq!(resolved.canonicalize().unwrap(), real_gitdir.canonicalize().unwrap());
-        assert!(resolved.join("HEAD").is_file(), "resolved gitdir must contain HEAD");
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            real_gitdir.canonicalize().unwrap()
+        );
+        assert!(
+            resolved.join("HEAD").is_file(),
+            "resolved gitdir must contain HEAD"
+        );
     }
 
     #[test]
@@ -298,7 +308,11 @@ mod tests {
                 .current_dir(cwd)
                 .output()
                 .expect("git failed to start");
-            assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         };
         run(&repo, &["init", "-q", "-b", "main"]);
         run(&repo, &["config", "user.email", "t@t"]);
@@ -309,9 +323,15 @@ mod tests {
         run(&repo, &["branch", "feature/one"]);
 
         let wt = tmp.path().join("wt-one");
-        run(&repo, &["worktree", "add", "-q", wt.to_str().unwrap(), "feature/one"]);
+        run(
+            &repo,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "feature/one"],
+        );
 
         let (branch, _dirty) = read_git_status(&wt).expect("worktree branch must resolve");
-        assert_eq!(branch, "feature/one", "branch from worktree HEAD, not cwd basename");
+        assert_eq!(
+            branch, "feature/one",
+            "branch from worktree HEAD, not cwd basename"
+        );
     }
 }

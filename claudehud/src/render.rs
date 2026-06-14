@@ -255,10 +255,7 @@ fn push_context(input: &Input, rounding: RoundingMode, out: &mut String) {
 fn push_dir_branch(input: &Input, git: Option<&(String, bool)>, tight: bool, out: &mut String) {
     let cwd = input.cwd.as_deref().unwrap_or("");
     let cwd_path = Path::new(cwd);
-    let dirname = cwd_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(cwd);
+    let dirname = cwd_path.file_name().and_then(|n| n.to_str()).unwrap_or(cwd);
     let base_repo = crate::git::resolve_base_repo(input, cwd_path);
     out.push_str(CYAN);
     if let Some(ref base) = base_repo {
@@ -1660,20 +1657,36 @@ mod tests {
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
         let out = strip_ansi(&render(
-            &input, None, &[], 0, None,
-            RoundingMode::default(), Layout::Comfortable,
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
         ));
-        assert!(out.starts_with("🤖"), "agent badge should be leftmost segment, got: {out:?}");
+        assert!(
+            out.starts_with("🤖"),
+            "agent badge should be leftmost segment, got: {out:?}"
+        );
     }
 
     #[test]
     fn test_render_no_agent_badge_when_agent_type_absent() {
         let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
         let out = strip_ansi(&render(
-            &input, None, &[], 0, None,
-            RoundingMode::default(), Layout::Comfortable,
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
         ));
-        assert!(!out.contains("🤖"), "no agent badge for foreground sessions, got: {out:?}");
+        assert!(
+            !out.contains("🤖"),
+            "no agent badge for foreground sessions, got: {out:?}"
+        );
     }
 
     #[test]
@@ -1685,10 +1698,18 @@ mod tests {
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
         let out = strip_ansi(&render(
-            &input, None, &[], 0, None,
-            RoundingMode::default(), Layout::Condensed,
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Condensed,
         ));
-        assert!(out.starts_with("🤖"), "agent badge in condensed layout, got: {out:?}");
+        assert!(
+            out.starts_with("🤖"),
+            "agent badge in condensed layout, got: {out:?}"
+        );
     }
 
     // ── resolve_base_repo render integration tests ────────────────────────────
@@ -1703,8 +1724,13 @@ mod tests {
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
         let plain = strip_ansi(&render(
-            &input, None, &[], 0, None,
-            RoundingMode::default(), Layout::Comfortable,
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
         ));
         assert!(
             plain.contains("myproject/tmp"),
@@ -1722,8 +1748,13 @@ mod tests {
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
         let plain = strip_ansi(&render(
-            &input, None, &[], 0, None,
-            RoundingMode::default(), Layout::Comfortable,
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::default(),
+            Layout::Comfortable,
         ));
         assert!(
             plain.contains("myproject"),

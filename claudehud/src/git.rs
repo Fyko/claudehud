@@ -2,11 +2,11 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+use crate::input::Input;
 use common::{
     hash_path, mmap_path, read_git_status, seqlock_read, watch_dir, watch_path, MMAP_SIZE,
 };
 use memmap2::Mmap;
-use crate::input::Input;
 
 /// Returns (branch, is_dirty) for the git repo containing `cwd`.
 /// Fast path: reads from daemon mmap file (~10µs).
@@ -39,7 +39,9 @@ pub fn resolve_branch(input: &Input, cwd: &Path) -> Option<(String, bool)> {
         .as_ref()
         .and_then(|w| w.original_branch.as_deref())
     {
-        let dirty = common::read_git_status(cwd).map(|(_, d)| d).unwrap_or(false);
+        let dirty = common::read_git_status(cwd)
+            .map(|(_, d)| d)
+            .unwrap_or(false);
         return Some((branch.to_string(), dirty));
     }
     branch_and_dirty(cwd)
@@ -161,7 +163,8 @@ mod tests {
         }"#;
         let input: crate::input::Input = serde_json::from_str(json).unwrap();
         let cwd = std::path::Path::new("/nonexistent/path");
-        let (branch, dirty) = resolve_branch(&input, cwd).expect("payload branch wins even without git");
+        let (branch, dirty) =
+            resolve_branch(&input, cwd).expect("payload branch wins even without git");
         assert_eq!(branch, "feature/from-payload");
         assert!(!dirty, "no git → no dirty signal");
     }
@@ -172,7 +175,10 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let input: crate::input::Input = serde_json::from_str("{}").unwrap();
         let result = resolve_branch(&input, &cwd);
-        assert!(result.is_some(), "should fall through to branch_and_dirty in a real repo");
+        assert!(
+            result.is_some(),
+            "should fall through to branch_and_dirty in a real repo"
+        );
     }
 
     #[test]

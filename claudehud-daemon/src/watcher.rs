@@ -78,7 +78,9 @@ mod tests {
     fn wait_for<F: Fn() -> bool>(timeout: Duration, f: F) -> bool {
         let start = Instant::now();
         while start.elapsed() < timeout {
-            if f() { return true; }
+            if f() {
+                return true;
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
         false
@@ -97,8 +99,15 @@ mod tests {
         std::fs::create_dir(&repo).unwrap();
         let run = |cwd: &std::path::Path, args: &[&str]| {
             let out = std::process::Command::new("git")
-                .args(args).current_dir(cwd).output().unwrap();
-            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         };
         run(&repo, &["init", "-q", "-b", "main"]);
         run(&repo, &["config", "user.email", "t@t"]);
@@ -109,7 +118,10 @@ mod tests {
         run(&repo, &["branch", "feature/one"]);
         run(&repo, &["branch", "feature/two"]);
         let wt = tmp.path().join("wt");
-        run(&repo, &["worktree", "add", "-q", wt.to_str().unwrap(), "feature/one"]);
+        run(
+            &repo,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "feature/one"],
+        );
 
         let (tx, rx) = unbounded();
         let watcher_thread = std::thread::spawn(move || start(rx));
@@ -130,8 +142,12 @@ mod tests {
         run(&wt, &["switch", "-q", "feature/two"]);
         assert!(
             wait_for(Duration::from_secs(3), || {
-                let Ok(bytes) = std::fs::read(&bin) else { return false };
-                if bytes.len() < MMAP_SIZE { return false }
+                let Ok(bytes) = std::fs::read(&bin) else {
+                    return false;
+                };
+                if bytes.len() < MMAP_SIZE {
+                    return false;
+                }
                 let mut buf = [0u8; MMAP_SIZE];
                 buf.copy_from_slice(&bytes[..MMAP_SIZE]);
                 let (b, _) = seqlock_read(&buf);
