@@ -1,3 +1,4 @@
+pub mod doctor;
 pub mod fmt;
 pub mod git;
 pub mod incidents;
