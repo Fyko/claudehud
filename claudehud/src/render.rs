@@ -6,7 +6,11 @@ use common::incidents::Incident;
 
 use crate::fmt::{self, *};
 use crate::input::Input;
-use crate::time::{format_duration, format_reset_time, ResetStyle};
+use crate::time::{format_duration, format_long_duration, format_reset_time, ResetStyle};
+
+/// Incidents at or beyond this age are treated as "long-running": filtered out of
+/// the normal list (collapsed to a breadcrumb in comfortable, hidden in condensed).
+const LONG_RUNNING_SECS: u64 = 86_400;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RoundingMode {
@@ -91,7 +95,7 @@ fn render_comfortable(
     push_dir_branch(input, git.as_ref(), false, &mut out);
 
     // ── Incident lines (between line 1 and rate limits) ────
-    push_incidents(incidents, total_active, &mut out);
+    push_incidents(incidents, total_active, true, &mut out);
 
     // ── Rate limits ────────────────────────────────────────
     if let Some(rl) = &input.rate_limits {
@@ -157,7 +161,7 @@ fn render_condensed(
     }
 
     // ── Incidents ──────────────────────────────────────────
-    push_incidents(incidents, total_active, &mut out);
+    push_incidents(incidents, total_active, false, &mut out);
 
     out
 }
@@ -243,11 +247,65 @@ fn push_dir_branch(input: &Input, git: Option<&(String, bool)>, tight: bool, out
     }
 }
 
-fn push_incidents(incidents: &[Incident], total_active: u8, out: &mut String) {
-    for inc in incidents {
-        out.push('\n');
-        push_incident_line(inc, out);
+/// How an incident should surface, given the layout and its age.
+#[derive(Debug, PartialEq, Eq)]
+enum IncidentSlot {
+    /// Fable is in the slammer — render the jail bit (comfortable only).
+    Jail,
+    /// Ordinary fresh incident — render the normal line.
+    Normal,
+    /// ≥24h old — drop the line, tally toward the breadcrumb (comfortable only).
+    LongRunning,
+    /// Drop it entirely, no trace (condensed: fable + long-running both vanish).
+    Hidden,
+}
+
+/// The suspended-models incident covers both Fable and Mythos; we hang the bit
+/// off "fable" since that's the one anyone's watching.
+fn is_fable_incident(title: &str) -> bool {
+    title.to_lowercase().contains("fable")
+}
+
+fn classify_incident(inc: &Incident, now: u64, comfortable: bool) -> IncidentSlot {
+    let fable = is_fable_incident(&inc.title);
+    let long_running = now.saturating_sub(inc.started_at) >= LONG_RUNNING_SECS;
+    if comfortable {
+        if fable {
+            IncidentSlot::Jail
+        } else if long_running {
+            IncidentSlot::LongRunning
+        } else {
+            IncidentSlot::Normal
+        }
+    } else if fable || long_running {
+        IncidentSlot::Hidden
+    } else {
+        IncidentSlot::Normal
     }
+}
+
+fn push_incidents(incidents: &[Incident], total_active: u8, comfortable: bool, out: &mut String) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let mut long_running: u8 = 0;
+    for inc in incidents {
+        match classify_incident(inc, now, comfortable) {
+            IncidentSlot::Jail => {
+                out.push('\n');
+                push_jail_line(inc, now, out);
+            }
+            IncidentSlot::Normal => {
+                out.push('\n');
+                push_incident_line(inc, now, out);
+            }
+            IncidentSlot::LongRunning => long_running += 1,
+            IncidentSlot::Hidden => {}
+        }
+    }
+
     let overflow = total_active.saturating_sub(incidents.len() as u8);
     if overflow > 0 {
         out.push('\n');
@@ -257,14 +315,32 @@ fn push_incidents(incidents: &[Incident], total_active: u8, out: &mut String) {
         out.push_str(RESET);
         out.push_str("\x1b]8;;\x1b\\");
     }
+
+    if long_running > 0 {
+        out.push('\n');
+        write!(out, "\x1b]8;;https://status.claude.com/\x1b\\").unwrap();
+        out.push_str(DIM);
+        write!(out, "+{long_running} ongoing (24h+)").unwrap();
+        out.push_str(RESET);
+        out.push_str("\x1b]8;;\x1b\\");
+    }
 }
 
-fn push_incident_line(inc: &Incident, out: &mut String) {
+/// Fable is doing time. `🔒 fable 5 · in model jail · 1d 4h served`
+fn push_jail_line(inc: &Incident, now: u64, out: &mut String) {
+    let served = format_long_duration(now.saturating_sub(inc.started_at));
+
+    write!(out, "\x1b]8;;{}\x1b\\", inc.url).unwrap();
+    out.push_str(fmt::color_for_severity(inc.severity));
+    out.push_str("🔒 fable 5 ");
+    out.push_str(DIM);
+    write!(out, "· in model jail · {served} served").unwrap();
+    out.push_str(RESET);
+    out.push_str("\x1b]8;;\x1b\\");
+}
+
+fn push_incident_line(inc: &Incident, now: u64, out: &mut String) {
     let url = &inc.url;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     let elapsed = now.saturating_sub(inc.started_at);
     let since = format_duration(elapsed);
 
@@ -869,6 +945,159 @@ mod tests {
         assert!(plain.contains("started 12m ago"));
         assert_eq!(out.matches('\n').count(), 1, "exactly one newline expected");
         assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/abc"));
+    }
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    fn incident_aged(title: &str, age_secs: u64) -> Incident {
+        use common::incidents::Severity;
+        Incident {
+            severity: Severity::Minor,
+            started_at: now_secs().saturating_sub(age_secs),
+            title: title.to_string(),
+            url: "https://status.claude.com/incidents/xyz".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_fable_jail_bit_comfortable() {
+        // 1d 4h old fable incident → jail bit, not a normal line.
+        let inc = incident_aged(
+            "We've suspended access to Claude Mythos 5 and Claude Fable 5",
+            100_800,
+        );
+        let out = render(
+            &Input::default(),
+            None,
+            &[inc],
+            1,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("🔒 fable 5"), "jail bit missing: {plain}");
+        assert!(plain.contains("in model jail · 1d 4h served"), "{plain}");
+        // exempt from the 24h filter — no breadcrumb for fable.
+        assert!(
+            !plain.contains("ongoing (24h+)"),
+            "fable should not hit the breadcrumb: {plain}"
+        );
+        assert!(
+            !plain.contains("suspended access"),
+            "raw incident title should be replaced: {plain}"
+        );
+    }
+
+    #[test]
+    fn test_fable_hidden_condensed() {
+        // condensed swallows fable entirely — nothing at all.
+        let inc = incident_aged("Claude Fable 5 suspended", 100_800);
+        let out = render(
+            &Input::default(),
+            None,
+            &[inc],
+            1,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
+        let plain = strip_ansi(&out);
+        assert!(
+            !plain.contains("model jail"),
+            "no jail bit in condensed: {plain}"
+        );
+        assert!(
+            !plain.contains("fable"),
+            "fable hidden in condensed: {plain}"
+        );
+        assert!(
+            !plain.contains("ongoing (24h+)"),
+            "no breadcrumb in condensed: {plain}"
+        );
+    }
+
+    #[test]
+    fn test_long_running_breadcrumb_comfortable() {
+        // ≥24h non-fable incident → collapsed to breadcrumb, line itself hidden.
+        let inc = incident_aged("Elevated API errors", 30 * 3600);
+        let out = render(
+            &Input::default(),
+            None,
+            &[inc],
+            1,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+        );
+        let plain = strip_ansi(&out);
+        assert!(
+            !plain.contains("Elevated API errors"),
+            "stale line should be hidden: {plain}"
+        );
+        assert!(
+            plain.contains("+1 ongoing (24h+)"),
+            "breadcrumb missing: {plain}"
+        );
+    }
+
+    #[test]
+    fn test_long_running_hidden_condensed() {
+        // ≥24h non-fable in condensed → gone, no breadcrumb.
+        let inc = incident_aged("Elevated API errors", 30 * 3600);
+        let out = render(
+            &Input::default(),
+            None,
+            &[inc],
+            1,
+            RoundingMode::Floor,
+            Layout::Condensed,
+        );
+        let plain = strip_ansi(&out);
+        assert!(!plain.contains("Elevated API errors"), "{plain}");
+        assert!(
+            !plain.contains("ongoing (24h+)"),
+            "no breadcrumb in condensed: {plain}"
+        );
+    }
+
+    #[test]
+    fn test_fresh_incident_still_normal_both_layouts() {
+        // <24h non-fable renders as a normal line in either layout.
+        for layout in [Layout::Comfortable, Layout::Condensed] {
+            let inc = incident_aged("Elevated API errors", 12 * 60);
+            let out = render(
+                &Input::default(),
+                None,
+                &[inc],
+                1,
+                RoundingMode::Floor,
+                layout,
+            );
+            let plain = strip_ansi(&out);
+            assert!(plain.contains("Elevated API errors"), "{layout:?}: {plain}");
+            assert!(plain.contains("started 12m ago"), "{layout:?}: {plain}");
+        }
+    }
+
+    #[test]
+    fn test_classify_incident_matrix() {
+        let now = now_secs();
+        let fresh = incident_aged("Elevated API errors", 60);
+        let stale = incident_aged("Elevated API errors", 30 * 3600);
+        let fable = incident_aged("Claude Fable 5 suspended", 30 * 3600);
+
+        assert_eq!(classify_incident(&fresh, now, true), IncidentSlot::Normal);
+        assert_eq!(classify_incident(&fresh, now, false), IncidentSlot::Normal);
+        assert_eq!(
+            classify_incident(&stale, now, true),
+            IncidentSlot::LongRunning
+        );
+        assert_eq!(classify_incident(&stale, now, false), IncidentSlot::Hidden);
+        assert_eq!(classify_incident(&fable, now, true), IncidentSlot::Jail);
+        assert_eq!(classify_incident(&fable, now, false), IncidentSlot::Hidden);
     }
 
     #[test]
