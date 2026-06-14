@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{fence, Ordering};
 
 pub mod config;
 pub mod incidents;
 pub mod notice;
+pub mod seqlock;
 pub mod version;
+
+use seqlock::SeqlockRecord;
 
 pub const MMAP_SIZE: usize = 138;
 pub const BRANCH_MAX: usize = 128;
@@ -52,11 +54,36 @@ pub fn watch_path_in(root: &Path, hash: u32) -> PathBuf {
     root.join("clhud-watch").join(hash.to_string())
 }
 
-// Layout:
-// [0..8]   u64 seqlock counter (even=stable, odd=write in progress)
-// [8]      u8 dirty flag
-// [9]      u8 branch name length
-// [10..138] [u8;128] branch name bytes (zero-padded)
+/// The git cache payload: the current branch name and whether the working tree
+/// is dirty. Stored behind a seqlock in the per-repo cache file.
+///
+/// Payload layout (after the 8-byte counter):
+/// `[0] u8 dirty flag · [1] u8 branch length · [2..130] [u8;128] branch (zero-padded)`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitStatus {
+    pub branch: String,
+    pub dirty: bool,
+}
+
+impl SeqlockRecord for GitStatus {
+    const SIZE: usize = MMAP_SIZE;
+
+    fn encode(&self, payload: &mut [u8]) {
+        payload[0] = self.dirty as u8;
+        let bytes = self.branch.as_bytes();
+        let len = bytes.len().min(BRANCH_MAX);
+        payload[1] = len as u8;
+        payload[2..2 + len].copy_from_slice(&bytes[..len]);
+        payload[2 + len..2 + BRANCH_MAX].fill(0);
+    }
+
+    fn decode(payload: &[u8]) -> Self {
+        let dirty = payload[0] != 0;
+        let len = (payload[1] as usize).min(BRANCH_MAX);
+        let branch = String::from_utf8_lossy(&payload[2..2 + len]).into_owned();
+        GitStatus { branch, dirty }
+    }
+}
 
 /// FNV-1a 32-bit hash of a path's bytes. No external deps.
 pub fn hash_path(path: &Path) -> u32 {
@@ -69,31 +96,22 @@ pub fn hash_path(path: &Path) -> u32 {
     hash
 }
 
-/// Seqlock read: spin until we get a consistent even-seq snapshot.
+/// Read the git cache: branch name + dirty flag. Returns `("", false)` when the
+/// buffer is too small (a missing or truncated cache reads as clean/no-branch).
 pub fn seqlock_read(mmap: &[u8]) -> (String, bool) {
-    loop {
-        let seq1 = read_u64_le(mmap, 0);
-        if seq1 & 1 == 1 {
-            std::hint::spin_loop();
-            continue;
-        }
-        fence(Ordering::Acquire);
-
-        let dirty = mmap[8] != 0;
-        let branch_len = (mmap[9] as usize).min(BRANCH_MAX);
-        let branch = String::from_utf8_lossy(&mmap[10..10 + branch_len]).into_owned();
-
-        fence(Ordering::Acquire);
-        let seq2 = read_u64_le(mmap, 0);
-        if seq1 == seq2 {
-            return (branch, dirty);
-        }
-        std::hint::spin_loop();
-    }
+    let GitStatus { branch, dirty } = seqlock::read::<GitStatus>(mmap).unwrap_or_default();
+    (branch, dirty)
 }
 
-fn read_u64_le(buf: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(buf[offset..offset + 8].try_into().unwrap())
+/// Write the git cache: branch name + dirty flag. Single-writer (daemon) only.
+pub fn seqlock_write(mmap: &mut [u8], branch: &str, dirty: bool) {
+    seqlock::write(
+        mmap,
+        &GitStatus {
+            branch: branch.to_owned(),
+            dirty,
+        },
+    );
 }
 
 /// Read the current branch name and dirty flag by invoking git directly.
@@ -220,6 +238,39 @@ mod tests {
         let (branch, dirty) = seqlock_read(&buf);
         assert_eq!(branch, "main");
         assert!(dirty);
+    }
+
+    #[test]
+    fn test_seqlock_write_then_read_dirty() {
+        let mut buf = vec![0u8; MMAP_SIZE];
+        seqlock_write(&mut buf, "feature-branch", true);
+        let (branch, dirty) = seqlock_read(&buf);
+        assert_eq!(branch, "feature-branch");
+        assert!(dirty);
+    }
+
+    #[test]
+    fn test_seqlock_write_then_read_clean() {
+        let mut buf = vec![0u8; MMAP_SIZE];
+        seqlock_write(&mut buf, "main", false);
+        let (branch, dirty) = seqlock_read(&buf);
+        assert_eq!(branch, "main");
+        assert!(!dirty);
+    }
+
+    #[test]
+    fn test_seqlock_write_truncates_long_branch() {
+        let mut buf = vec![0u8; MMAP_SIZE];
+        let long = "b".repeat(BRANCH_MAX + 20);
+        seqlock_write(&mut buf, &long, false);
+        let (branch, _) = seqlock_read(&buf);
+        assert_eq!(branch.len(), BRANCH_MAX);
+    }
+
+    #[test]
+    fn test_seqlock_read_too_small_is_empty() {
+        let buf = [0u8; MMAP_SIZE - 1];
+        assert_eq!(seqlock_read(&buf), (String::new(), false));
     }
 
     #[test]
