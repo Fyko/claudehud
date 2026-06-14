@@ -1,0 +1,3 @@
+# Silent degradation: every feature no-ops on failure
+
+A statusline runs on every prompt render, so it must never break the prompt or surface noisy errors. We decided that every feature degrades silently rather than failing loudly: if the daemon isn't running the client falls back to a direct `git` subprocess once; if the incident cache is absent the incident line simply doesn't appear; if an autoupdate check fails the installed version stays put; if a cost/rate-limit field is missing its segment is hidden. The trade-off is that a failure shows up as slightly stale or absent output instead of an error — which is the correct bias for a HUD, but means contributors should not "fix" these no-op paths into error paths.
