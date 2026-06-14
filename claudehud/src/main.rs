@@ -1,9 +1,9 @@
 use std::io::{self, IsTerminal, Read, Write};
-use std::path::Path;
 use std::process::ExitCode;
 
+use claudehud::orchestrate::{self, Options, SystemEnv};
 use claudehud::render::RoundingMode;
-use claudehud::{git, incidents, input, install, notice, render, update};
+use claudehud::{install, render, update};
 
 const HELP: &str = "\
 claudehud — statusline renderer for Claude Code
@@ -113,36 +113,16 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
         _ => render::Layout::default(),
     };
 
+    // Thin adapter: read real stdin, then hand the raw payload + the live
+    // environment (real git cache/registration, incident mmap, on-disk notice
+    // read against the wall clock) to the orchestration. All decisions live in
+    // `orchestrate::run`; `main` only wires real I/O to it.
     let mut raw = String::new();
     io::stdin().read_to_string(&mut raw).unwrap_or(0);
     log_stdin(&raw);
 
-    if raw.trim().is_empty() {
-        print!("Claude");
-        return ExitCode::SUCCESS;
-    }
-
-    let input: input::Input = serde_json::from_str(&raw).unwrap_or_default();
-    let git = input
-        .cwd
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .and_then(|cwd| git::resolve_branch(&input, Path::new(cwd)));
-
-    let (incidents, total_active) = incidents::read_incidents();
-    let update_notice = notice::active_notice();
-    print!(
-        "{}",
-        render::render(
-            &input,
-            git,
-            &incidents,
-            total_active,
-            update_notice.as_deref(),
-            rounding,
-            layout
-        )
-    );
+    let hud = orchestrate::run(&raw, &SystemEnv, Options { rounding, layout });
+    print!("{hud}");
     ExitCode::SUCCESS
 }
 
