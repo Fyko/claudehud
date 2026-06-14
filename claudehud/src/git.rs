@@ -69,6 +69,69 @@ fn register(cwd: &Path, hash: u32) {
     }
 }
 
+/// Determine the base repo name for the given cwd.
+///
+/// Two-path precedence:
+///
+/// **Path A (payload):** if `input.worktree.original_cwd` is `Some`, its
+/// basename is returned immediately — CC already knows the real repo root.
+///
+/// **Path B (gitdir introspection):** otherwise, walk up to the git root and
+/// resolve the gitdir. If `<gitdir>/commondir` exists (worktree case), read
+/// that file and resolve it relative to the gitdir; the parent of the resolved
+/// path is the main repo's `.git` dir, and its parent's basename is the repo
+/// name. If `commondir` is absent (regular repo), `<gitdir>.parent()` is the
+/// repo root and its basename is returned.
+///
+/// Returns `None` when cwd is not in a git repo.
+pub fn resolve_base_repo(input: &Input, cwd: &Path) -> Option<String> {
+    // Path A: payload takes precedence.
+    if let Some(original_cwd) = input
+        .worktree
+        .as_ref()
+        .and_then(|w| w.original_cwd.as_deref())
+    {
+        return Path::new(original_cwd)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string());
+    }
+
+    // Path B: derive from gitdir.
+    let git_root = common::find_git_root(cwd)?;
+    let gitdir = common::resolve_gitdir(&git_root)?;
+
+    let commondir_path = gitdir.join("commondir");
+    if commondir_path.exists() {
+        // We're in a linked worktree. `commondir` contains a relative (or
+        // absolute) path from `gitdir` to the common gitdir.
+        let contents = std::fs::read_to_string(&commondir_path).ok()?;
+        let pointer = contents.trim();
+        let common_gitdir = {
+            let p = Path::new(pointer);
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                gitdir.join(p)
+            }
+        };
+        let resolved = common_gitdir.canonicalize().ok()?;
+        // resolved is the main .git dir; its parent is the repo root.
+        resolved
+            .parent()?
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+    } else {
+        // Regular repo: gitdir == <repo_root>/.git, so gitdir.parent() is the repo root.
+        gitdir
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +183,95 @@ mod tests {
         let input: crate::input::Input = serde_json::from_str(json).unwrap();
         let (branch, _) = resolve_branch(&input, &cwd).unwrap();
         assert_eq!(branch, "from-payload");
+    }
+
+    // ── resolve_base_repo tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_base_repo_from_payload_original_cwd() {
+        // Path A: payload's original_cwd wins even with a nonexistent cwd.
+        let json = r#"{"worktree": {"original_cwd": "/Users/foo/hellopatient"}}"#;
+        let input: crate::input::Input = serde_json::from_str(json).unwrap();
+        let cwd = Path::new("/nonexistent/path/that/has/no/git");
+        let result = resolve_base_repo(&input, cwd);
+        assert_eq!(result, Some("hellopatient".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_base_repo_from_worktree_gitdir() {
+        use std::process::Command;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("myrepo");
+        std::fs::create_dir(&repo).unwrap();
+
+        let run = |cwd: &std::path::Path, args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("git failed to start");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        run(&repo, &["init", "-q", "-b", "main"]);
+        run(&repo, &["config", "user.email", "t@t"]);
+        run(&repo, &["config", "user.name", "t"]);
+        std::fs::write(repo.join("a"), "hi").unwrap();
+        run(&repo, &["add", "a"]);
+        run(&repo, &["commit", "-q", "-m", "init"]);
+        run(&repo, &["branch", "feature/wt"]);
+
+        let wt = tmp.path().join("wt-one");
+        run(
+            &repo,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "feature/wt"],
+        );
+
+        let input: crate::input::Input = serde_json::from_str("{}").unwrap();
+        let result = resolve_base_repo(&input, &wt);
+        assert_eq!(
+            result,
+            Some("myrepo".to_string()),
+            "base repo name should be the main repo's basename"
+        );
+    }
+
+    #[test]
+    fn test_resolve_base_repo_returns_repo_basename_in_regular_repo() {
+        use std::process::Command;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("myregularepo");
+        std::fs::create_dir(&repo).unwrap();
+
+        let run = |cwd: &std::path::Path, args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("git failed to start");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        run(&repo, &["init", "-q", "-b", "main"]);
+        run(&repo, &["config", "user.email", "t@t"]);
+        run(&repo, &["config", "user.name", "t"]);
+
+        let input: crate::input::Input = serde_json::from_str("{}").unwrap();
+        let result = resolve_base_repo(&input, &repo);
+        assert_eq!(
+            result,
+            Some("myregularepo".to_string()),
+            "regular repo should return its own basename"
+        );
     }
 }
