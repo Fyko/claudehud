@@ -4,6 +4,7 @@ use std::sync::atomic::{fence, Ordering};
 
 pub mod config;
 pub mod incidents;
+pub mod notice;
 pub mod version;
 
 pub const MMAP_SIZE: usize = 138;
