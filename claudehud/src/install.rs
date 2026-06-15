@@ -132,6 +132,7 @@ fn set_statusline_command(value: Value, command: &str) -> Value {
         _ => serde_json::Map::new(),
     };
     let mut sl = serde_json::Map::new();
+    sl.insert("type".to_string(), Value::String("command".to_string()));
     sl.insert("command".to_string(), Value::String(command.to_string()));
     obj.insert("statusLine".to_string(), Value::Object(sl));
     Value::Object(obj)
@@ -369,6 +370,8 @@ mod tests {
         let v = serde_json::json!({});
         let got = set_statusline_command(v, "/bin/claudehud");
         assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
+        // /doctor requires statusLine.type == "command"
+        assert_eq!(got["statusLine"]["type"], "command");
     }
 
     #[test]
