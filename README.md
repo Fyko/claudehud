@@ -130,27 +130,44 @@ CLAUDEHUD_LAYOUT=condensed
 Comfortable renders the HUD across multiple lines with full bars and a blank gap before rate limits:
 
 ```
-Opus 4.7 (1M context) │ ✍️ 4% │ claudehud (main*)
+Opus 4.7 (1M context) high │ ctx 4% │ claudehud (main*)
 
 current ○○○○○○○○○○   9% ⟳ 10:50am
 weekly  ●○○○○○○○○○  12% ⟳ apr 25, 7:00pm
 ```
 
-Condensed collapses everything onto a single line, with shorter rate-limit bars (4 dots) inline:
+Condensed collapses everything onto a single line. Rather than squeeze every
+rate-limit window in, it shows one at a time in a rotating slot — a full bar
+plus a countdown, cycling every 8 seconds:
 
 ```
-Opus 4.7 │ ✍️ 4% │ claudehud(main*) │ ○○○○ 5h 9% ⟳ 10:50am │ ○○○○ 7d 12% ⟳ apr 25, 7:00pm
+Opus 4.7 (1M) high │ ctx 4% │ claudehud(main*) │ ○○○○○○○○○○ 5h 9% ⟳ 2h11m
 ```
+
+Any window at 90% or above pins the slot and stops the rotation, so a nearly
+spent budget can't hide for two turns of the wheel. The rotation is derived
+from the clock, not a counter, so every open session shows the same window at
+the same moment — see [`refreshInterval`](#claude-code) for keeping it moving
+while the session is idle.
+
+The model segment carries a `⚡` when fast mode is on, `(1M)` for an extended
+context window (condensed only — comfortable keeps the harness's own wording),
+and the reasoning effort after the name, colored by tier: `medium` green,
+`high` yellow, `xhigh` orange, `max` red, `low` dim.
 
 On API billing (no `rate_limits` block from the harness), a 💰 segment with `cost.total_cost_usd` replaces the rate-limit rows:
 
 ```
-Opus 4.7 (1M context) │ ✍️ 3% │ 💰 $0.13 │ claudehud (main*)
+Opus 4.7 (1M context) high │ ctx 3% │ 💰 $0.13 │ claudehud (main*)
 ```
 
 The segment is hidden when the field is missing or `$0`, and also hidden whenever `rate_limits` is present — plan users see an estimated cost from the harness, not actual spend, so showing it would be misleading. Tiered color: green &lt; $1, yellow &lt; $5, orange &lt; $20, red ≥ $20.
 
-Active incidents still render on their own line below row 1 in both layouts.
+Active incidents still render on their own line below row 1 in both layouts. Anything running 24 hours or longer collapses into a `+N ongoing (24h+)` breadcrumb.
+
+The context percentage honors `CLAUDE_CODE_AUTO_COMPACT_WINDOW`: when you cap
+auto-compact below the model's window, the percentage is measured against the
+cap you'll actually hit, not the full window.
 
 Unknown values (`CLAUDEHUD_LAYOUT=foo`) print a warning to stderr and fall back to `comfortable`.
 
@@ -161,10 +178,10 @@ On Max plans, Fable 5 draws on up to 50% of your weekly allowance and gets its o
 Because that's the only part of claudehud that touches your credentials, it's off unless you ask for it:
 
 ```bash
-echo 'fable=true' >> ~/.config/claudehud/config
+echo 'fable=true' >> ~/.config/claudehud/config   # %APPDATA%\claudehud\config on Windows
 ```
 
-The daemon then polls every 5 minutes and writes `percent` + reset time to `/tmp/clhud-fable`; the client renders it as a third row (comfortable) or a third inline bar (condensed):
+The daemon then polls every 5 minutes and writes `percent` + reset time to `/tmp/clhud-fable`; the client renders it as a third row (comfortable) or a third stop in the rotating slot (condensed):
 
 ```
 current ●●●●●●●●●○  96% ⟳ 10:19am

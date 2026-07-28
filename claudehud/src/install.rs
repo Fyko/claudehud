@@ -1,5 +1,6 @@
 //! `claudehud install` — write statusLine config into ~/.claude/settings.json.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
@@ -152,9 +153,14 @@ fn set_statusline_command(value: Value, command: &str) -> Value {
 /// most Git Bash / MSYS environments); falls back to `$USERPROFILE` (the
 /// standard Windows env var). Returns `None` if neither is set.
 fn resolve_home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
+    home_from(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
+}
+
+/// The precedence itself, split out from the environment read so tests can
+/// exercise it without mutating process-wide state (two tests doing that raced
+/// each other under the parallel test runner).
+fn home_from(home: Option<OsString>, userprofile: Option<OsString>) -> Option<PathBuf> {
+    home.or(userprofile).map(PathBuf::from)
 }
 
 fn resolve_settings_path(
@@ -623,39 +629,23 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_home_prefers_home_over_userprofile() {
-        // Tests mutate process env and must run serially — see Step 2.
-        let prev_home = std::env::var_os("HOME");
-        let prev_up = std::env::var_os("USERPROFILE");
-        std::env::set_var("HOME", "/tmp/home-wins");
-        std::env::set_var("USERPROFILE", "/tmp/userprofile-loses");
-        let got = resolve_home_dir();
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match prev_up {
-            Some(v) => std::env::set_var("USERPROFILE", v),
-            None => std::env::remove_var("USERPROFILE"),
-        }
-        assert_eq!(got, Some(PathBuf::from("/tmp/home-wins")));
+    fn test_home_beats_userprofile() {
+        assert_eq!(
+            home_from(Some("/tmp/home-wins".into()), Some("/tmp/loses".into())),
+            Some(PathBuf::from("/tmp/home-wins"))
+        );
     }
 
     #[test]
-    fn test_resolve_home_falls_back_to_userprofile() {
-        let prev_home = std::env::var_os("HOME");
-        let prev_up = std::env::var_os("USERPROFILE");
-        std::env::remove_var("HOME");
-        std::env::set_var("USERPROFILE", "/tmp/userprofile-only");
-        let got = resolve_home_dir();
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match prev_up {
-            Some(v) => std::env::set_var("USERPROFILE", v),
-            None => std::env::remove_var("USERPROFILE"),
-        }
-        assert_eq!(got, Some(PathBuf::from("/tmp/userprofile-only")));
+    fn test_userprofile_is_the_windows_fallback() {
+        assert_eq!(
+            home_from(None, Some("/tmp/userprofile-only".into())),
+            Some(PathBuf::from("/tmp/userprofile-only"))
+        );
+    }
+
+    #[test]
+    fn test_no_home_at_all_is_none() {
+        assert_eq!(home_from(None, None), None);
     }
 }

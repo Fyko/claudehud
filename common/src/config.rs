@@ -1,4 +1,5 @@
-//! Daemon-readable config: `${XDG_CONFIG_HOME:-$HOME/.config}/claudehud/config`.
+//! Daemon-readable config: `${XDG_CONFIG_HOME:-$HOME/.config}/claudehud/config`
+//! on Unix, `%APPDATA%\claudehud\config` on Windows.
 //! Dead-simple `key=value`, one per line. `#` comments + blank lines ignored.
 //! Absent file → defaults (autoupdate on, no pin).
 
@@ -24,9 +25,12 @@ impl Default for Config {
     }
 }
 
-/// Resolve the config file path. Honors `XDG_CONFIG_HOME`, else `$HOME/.config`.
-/// Windows path is a seam (unimplemented in v1) — returns an empty path there so
-/// callers treat it as "absent → defaults".
+/// Resolve the config file path. On Unix, honors `XDG_CONFIG_HOME`, else
+/// `$HOME/.config`. On Windows, `%APPDATA%` (roaming, so the config follows a
+/// domain profile), falling back to `%USERPROFILE%\AppData\Roaming`.
+///
+/// Returns an empty path when no home can be resolved at all; callers treat
+/// that as "absent → defaults".
 pub fn config_path() -> PathBuf {
     #[cfg(unix)]
     {
@@ -43,6 +47,16 @@ pub fn config_path() -> PathBuf {
     }
     #[cfg(not(unix))]
     {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            return PathBuf::from(appdata).join("claudehud").join("config");
+        }
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            return PathBuf::from(profile)
+                .join("AppData")
+                .join("Roaming")
+                .join("claudehud")
+                .join("config");
+        }
         PathBuf::new()
     }
 }
@@ -115,6 +129,22 @@ mod tests {
         assert!(parse("fable = on").fable);
         assert!(!parse("fable=false").fable);
         assert!(!parse("fable=wat").fable);
+    }
+
+    #[test]
+    fn config_path_lands_under_the_platform_config_dir() {
+        let path = config_path();
+        // Whatever the platform, the tail is the same and it isn't empty —
+        // an empty path is the "no home at all" case, which CI always has.
+        assert!(
+            path.ends_with(std::path::Path::new("claudehud").join("config")),
+            "unexpected config path: {path:?}"
+        );
+        #[cfg(windows)]
+        assert!(
+            path.to_string_lossy().contains("Roaming"),
+            "windows config should be roaming: {path:?}"
+        );
     }
 
     #[test]
