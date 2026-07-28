@@ -41,10 +41,6 @@ pub fn mmap_path(hash: u32) -> PathBuf {
     mmap_path_in(&cache_dir(), hash)
 }
 
-pub fn watch_path(hash: u32) -> PathBuf {
-    watch_path_in(&cache_dir(), hash)
-}
-
 /// Test seam: build mmap path under an explicit root.
 pub fn mmap_path_in(root: &Path, hash: u32) -> PathBuf {
     root.join(format!("clhud-{hash}.bin"))
