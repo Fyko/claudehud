@@ -98,12 +98,18 @@ fn ensure_registered_in(root: &Path, cwd: &Path, hash: u32) {
 /// **Path A (payload):** if `input.worktree.original_cwd` is `Some`, its
 /// basename is returned immediately — CC already knows the real repo root.
 ///
-/// **Path B (gitdir introspection):** otherwise, walk up to the git root and
-/// resolve the gitdir. Only worktrees get a prefix — if `<gitdir>/commondir`
-/// exists, read that file, resolve it relative to the gitdir, and return the
-/// main repo's basename. For regular repos (no `commondir`) we return `None`
-/// so the dir segment renders as-was (no `repo/subdir` regression on
-/// foreground renders from a repo subdirectory).
+/// **Path B (payload workspace):** `workspace.git_worktree` answers "am I in a
+/// linked worktree" for any git worktree, not just `--worktree` sessions, and
+/// `workspace.repo.name` names the repo it belongs to. Together they replace
+/// the gitdir walk below — when both are present.
+///
+/// **Path C (gitdir introspection):** the fallback, for worktrees of a repo
+/// with no `origin` remote (where the harness omits `workspace.repo`). Walk up
+/// to the git root and resolve the gitdir. Only worktrees get a prefix — if
+/// `<gitdir>/commondir` exists, read that file, resolve it relative to the
+/// gitdir, and return the main repo's basename. For regular repos (no
+/// `commondir`) we return `None` so the dir segment renders as-was (no
+/// `repo/subdir` regression on foreground renders from a repo subdirectory).
 ///
 /// Returns `None` when cwd is not in a git repo OR when it's in a regular
 /// (non-worktree) repo.
@@ -120,7 +126,16 @@ pub fn resolve_base_repo(input: &Input, cwd: &Path) -> Option<String> {
             .map(|s| s.to_string());
     }
 
-    // Path B: derive from gitdir.
+    // Path B: the harness already knows both halves of the answer.
+    if let Some(ws) = input.workspace.as_ref() {
+        if ws.git_worktree.is_some() {
+            if let Some(name) = ws.repo.as_ref().and_then(|r| r.name.as_deref()) {
+                return Some(name.to_string());
+            }
+        }
+    }
+
+    // Path C: derive from gitdir.
     let git_root = common::find_git_root(cwd)?;
     let gitdir = common::resolve_gitdir(&git_root)?;
 
@@ -244,6 +259,44 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_base_repo_from_payload_workspace() {
+        // Path B: git_worktree + repo.name, no filesystem access at all.
+        let json = r#"{
+            "workspace": {"git_worktree": "feature-xyz", "repo": {"name": "claudehud"}}
+        }"#;
+        let input: crate::input::Input = serde_json::from_str(json).unwrap();
+        let cwd = Path::new("/nonexistent/path/that/has/no/git");
+        assert_eq!(
+            resolve_base_repo(&input, cwd),
+            Some("claudehud".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_base_repo_ignores_repo_name_outside_a_worktree() {
+        // `repo` is present in every git repo; only `git_worktree` means the
+        // dir segment needs a prefix. Without this guard a plain repo would
+        // start rendering `claudehud/claudehud`.
+        let json = r#"{"workspace": {"repo": {"name": "claudehud"}}}"#;
+        let input: crate::input::Input = serde_json::from_str(json).unwrap();
+        let cwd = Path::new("/nonexistent/path/that/has/no/git");
+        assert_eq!(resolve_base_repo(&input, cwd), None);
+    }
+
+    #[test]
+    fn test_resolve_base_repo_original_cwd_beats_workspace() {
+        let json = r#"{
+            "worktree": {"original_cwd": "/Users/foo/hellopatient"},
+            "workspace": {"git_worktree": "wt", "repo": {"name": "claudehud"}}
+        }"#;
+        let input: crate::input::Input = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            resolve_base_repo(&input, Path::new("/nope")),
+            Some("hellopatient".to_string())
+        );
+    }
+
+    #[test]
     fn test_resolve_base_repo_from_worktree_gitdir() {
         use std::process::Command;
 
@@ -284,6 +337,16 @@ mod tests {
             result,
             Some("myrepo".to_string()),
             "base repo name should be the main repo's basename"
+        );
+
+        // The reason Path C survives: this repo has no `origin`, so the
+        // harness sends `git_worktree` with no `repo` to pair it with.
+        let no_origin: crate::input::Input =
+            serde_json::from_str(r#"{"workspace": {"git_worktree": "wt-one"}}"#).unwrap();
+        assert_eq!(
+            resolve_base_repo(&no_origin, &wt),
+            Some("myrepo".to_string()),
+            "should fall through to gitdir introspection"
         );
     }
 

@@ -57,6 +57,19 @@ pub struct Workspace {
     pub current_dir: Option<String>,
     pub project_dir: Option<String>,
     pub added_dirs: Option<Vec<String>>,
+    /// Worktree name when cwd sits inside any linked git worktree — unlike
+    /// `worktree`, which only appears for `--worktree` sessions.
+    pub git_worktree: Option<String>,
+    /// Repo identity parsed from the `origin` remote. Absent outside a repo or
+    /// when no `origin` is configured.
+    pub repo: Option<Repo>,
+}
+
+#[derive(Deserialize)]
+pub struct Repo {
+    pub host: Option<String>,
+    pub owner: Option<String>,
+    pub name: Option<String>,
 }
 
 #[derive(Deserialize)]
