@@ -66,6 +66,21 @@ pub fn format_duration(secs: u64) -> String {
     }
 }
 
+/// Time left until a rate-limit window resets, at a glance: `2d3h` / `2h11m` /
+/// `45m` / `<1m`. Tighter than a wall-clock time, which is the point — the
+/// condensed layout pays for every column.
+pub fn format_countdown(secs: u64) -> String {
+    if secs >= 86_400 {
+        format!("{}d{}h", secs / 86_400, (secs % 86_400) / 3600)
+    } else if secs >= 3600 {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m", secs / 60)
+    } else {
+        "<1m".to_string()
+    }
+}
+
 /// Format epoch as local time.
 pub fn format_reset_time(epoch: u64, style: ResetStyle) -> String {
     use time::{OffsetDateTime, UtcOffset};
@@ -103,6 +118,17 @@ pub fn format_reset_time(epoch: u64, style: ResetStyle) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_countdown() {
+        assert_eq!(format_countdown(0), "<1m");
+        assert_eq!(format_countdown(59), "<1m");
+        assert_eq!(format_countdown(60), "1m");
+        assert_eq!(format_countdown(45 * 60), "45m");
+        assert_eq!(format_countdown(2 * 3600 + 11 * 60), "2h11m");
+        assert_eq!(format_countdown(86_400), "1d0h");
+        assert_eq!(format_countdown(2 * 86_400 + 3 * 3600), "2d3h");
+    }
 
     #[test]
     fn test_parse_iso8601_utc_z() {

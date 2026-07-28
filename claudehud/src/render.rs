@@ -7,7 +7,7 @@ use common::incidents::Incident;
 
 use crate::fmt::{self, *};
 use crate::input::Input;
-use crate::time::{format_duration, format_reset_time, ResetStyle};
+use crate::time::{format_countdown, format_duration, format_reset_time, ResetStyle};
 
 /// Incidents at or beyond this age are treated as "long-running": filtered out of
 /// the normal list (collapsed to a breadcrumb in comfortable, hidden in condensed).
@@ -189,32 +189,14 @@ fn render_condensed(
     out.push_str(SEP);
     push_dir_branch(input, git.as_ref(), true, &mut out);
 
-    // ── Rate limits inline ─────────────────────────────────
-    if let Some(rl) = &input.rate_limits {
-        if let Some(fh) = &rl.five_hour {
-            if let Some(pct_f) = fh.used_percentage {
-                let pct = rounding.apply(pct_f);
-                out.push_str(SEP);
-                push_rate_inline("5h", pct, fh.resets_at, ResetStyle::Time, &mut out);
-            }
-        }
-        if let Some(sd) = &rl.seven_day {
-            if let Some(pct_f) = sd.used_percentage {
-                let pct = rounding.apply(pct_f);
-                out.push_str(SEP);
-                push_rate_inline("7d", pct, sd.resets_at, ResetStyle::DateTime, &mut out);
-            }
-        }
-        if let Some(f) = fable {
-            out.push_str(SEP);
-            push_rate_inline(
-                "fbl",
-                f.percent,
-                Some(f.resets_at),
-                ResetStyle::DateTime,
-                &mut out,
-            );
-        }
+    // ── Rate limits: one rotating slot ─────────────────────
+    // Three windows side by side ate ~84 columns. One at a time buys a full
+    // 10-dot bar and a countdown, and the slot cycles so the others still get
+    // seen — except when something is nearly spent, which pins the slot.
+    let windows = rate_windows(input, rounding, fable);
+    if let Some(w) = pick_window(&windows, now_secs()) {
+        out.push_str(SEP);
+        push_rate_rotating(w, now_secs(), &mut out);
     }
 
     // ── Incidents ──────────────────────────────────────────
@@ -222,6 +204,81 @@ fn render_condensed(
     push_update_notice(update_notice, &mut out);
 
     out
+}
+
+/// One rate-limit window, flattened out of the payload + the fable cache so the
+/// rotation doesn't care where each number came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RateWindow {
+    label: &'static str,
+    pct: u8,
+    resets_at: Option<u64>,
+}
+
+/// How long the rotating slot holds one window before moving on.
+const ROTATE_SECS: u64 = 8;
+
+/// At or above this, a window stops taking its turn and holds the slot: when
+/// you're nearly out, hiding it for 16 seconds is the wrong trade.
+const PIN_PCT: u8 = 90;
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn rate_windows(
+    input: &Input,
+    rounding: RoundingMode,
+    fable: Option<FableLimit>,
+) -> Vec<RateWindow> {
+    let mut out = Vec::with_capacity(3);
+    if let Some(rl) = &input.rate_limits {
+        if let Some(pct) = rl.five_hour.as_ref().and_then(|w| w.used_percentage) {
+            out.push(RateWindow {
+                label: "5h",
+                pct: rounding.apply(pct),
+                resets_at: rl.five_hour.as_ref().and_then(|w| w.resets_at),
+            });
+        }
+        if let Some(pct) = rl.seven_day.as_ref().and_then(|w| w.used_percentage) {
+            out.push(RateWindow {
+                label: "7d",
+                pct: rounding.apply(pct),
+                resets_at: rl.seven_day.as_ref().and_then(|w| w.resets_at),
+            });
+        }
+        if let Some(f) = fable {
+            out.push(RateWindow {
+                label: "fbl",
+                pct: f.percent,
+                resets_at: Some(f.resets_at),
+            });
+        }
+    }
+    out
+}
+
+/// Which window gets the slot right now: the most-spent one once anything
+/// crosses [`PIN_PCT`], otherwise a plain time-sliced rotation.
+///
+/// The rotation is derived from the clock rather than a counter, so it needs no
+/// state on disk and every open session lands on the same window at the same
+/// moment. Claude Code re-runs the statusline often enough that the slot turns
+/// over on its own.
+fn pick_window(windows: &[RateWindow], now: u64) -> Option<RateWindow> {
+    let pinned = windows
+        .iter()
+        .filter(|w| w.pct >= PIN_PCT)
+        .max_by_key(|w| w.pct);
+    if let Some(w) = pinned {
+        return Some(*w);
+    }
+    windows
+        .get((now / ROTATE_SECS) as usize % windows.len().max(1))
+        .copied()
 }
 
 fn push_agent_badge(input: &Input, out: &mut String) {
@@ -437,26 +494,22 @@ fn push_incident_line(inc: &Incident, now: u64, out: &mut String) {
     out.push_str("\x1b]8;;\x1b\\");
 }
 
-fn push_rate_inline(
-    label: &str,
-    pct: u8,
-    resets_at: Option<u64>,
-    style: ResetStyle,
-    out: &mut String,
-) {
-    fmt::build_bar(pct, 4, out);
+/// The condensed layout's single usage slot: full bar, label, percent, and how
+/// long until it resets.
+fn push_rate_rotating(w: RateWindow, now: u64, out: &mut String) {
+    fmt::build_bar(w.pct, 10, out);
     out.push(' ');
-    out.push_str(label);
+    out.push_str(w.label);
     out.push(' ');
-    out.push_str(color_for_pct(pct));
-    write!(out, "{pct}%").unwrap();
+    out.push_str(color_for_pct(w.pct));
+    write!(out, "{}%", w.pct).unwrap();
     out.push_str(RESET);
-    if let Some(epoch) = resets_at.filter(|&e| e > 0) {
+    if let Some(epoch) = w.resets_at.filter(|&e| e > now) {
         out.push(' ');
         out.push_str(DIM);
         out.push_str("⟳ ");
         out.push_str(RESET);
-        out.push_str(&format_reset_time(epoch, style));
+        out.push_str(&format_countdown(epoch - now));
     }
 }
 
@@ -1038,7 +1091,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_rate_limits_condensed_inline() {
+    fn test_render_rate_limits_condensed_shows_one_rotating_window() {
         let json = r#"{
             "rate_limits": {
                 "five_hour": {"used_percentage": 9.0, "resets_at": 1705316400},
@@ -1058,22 +1111,19 @@ mod tests {
         );
         let plain = strip_ansi(&result);
 
-        assert!(plain.contains("5h"), "5h label should render");
-        assert!(plain.contains("7d"), "7d label should render");
+        // Exactly one window holds the slot — never both at once.
+        let labels = ["5h", "7d"];
+        let shown = labels.iter().filter(|l| plain.contains(**l)).count();
+        assert_eq!(shown, 1, "one window at a time, got: {plain}");
+
         assert!(
-            !plain.contains("current"),
-            "comfortable label should not appear"
-        );
-        assert!(
-            !plain.contains("weekly"),
-            "comfortable label should not appear"
+            !plain.contains("current") && !plain.contains("weekly"),
+            "comfortable labels should not appear: {plain}"
         );
 
-        assert!(plain.contains("9%"), "5h pct should render");
-        assert!(plain.contains("12%"), "7d pct should render");
-
-        let dots = plain.matches('○').count() + plain.matches('●').count();
-        assert!(dots >= 8, "expected ≥8 bar dots inline (got {dots})");
+        // A full-width bar, now that there's room for one.
+        let dots = plain.matches('\u{25cb}').count() + plain.matches('\u{25cf}').count();
+        assert_eq!(dots, 10, "expected a 10-dot bar (got {dots}): {plain}");
 
         assert!(
             !result.contains('\n'),
@@ -1338,6 +1388,118 @@ mod tests {
         assert!(plain.contains("⚡ Opus 5"), "{plain}");
     }
 
+    // ── Rotating usage slot ───────────────────────────────────────────────────
+
+    fn win(label: &'static str, pct: u8) -> RateWindow {
+        RateWindow {
+            label,
+            pct,
+            resets_at: Some(2_000_000_000),
+        }
+    }
+
+    #[test]
+    fn test_pick_window_cycles_through_every_window() {
+        let ws = [win("5h", 10), win("7d", 20), win("fbl", 30)];
+        // One full turn of the wheel, sampled at each slot boundary.
+        let seen: Vec<&str> = (0..3)
+            .map(|i| pick_window(&ws, i * ROTATE_SECS).unwrap().label)
+            .collect();
+        assert_eq!(seen, ["5h", "7d", "fbl"]);
+        // And it wraps.
+        assert_eq!(pick_window(&ws, 3 * ROTATE_SECS).unwrap().label, "5h");
+    }
+
+    #[test]
+    fn test_pick_window_holds_each_window_for_the_full_interval() {
+        let ws = [win("5h", 10), win("7d", 20)];
+        for t in 0..ROTATE_SECS {
+            assert_eq!(pick_window(&ws, t).unwrap().label, "5h", "t={t}");
+        }
+        assert_eq!(pick_window(&ws, ROTATE_SECS).unwrap().label, "7d");
+    }
+
+    #[test]
+    fn test_pick_window_pins_a_nearly_spent_window() {
+        let ws = [win("5h", PIN_PCT), win("7d", 20), win("fbl", 30)];
+        // Every point in the cycle, same answer — the rotation stops.
+        for t in [0, ROTATE_SECS, 2 * ROTATE_SECS, 5 * ROTATE_SECS] {
+            assert_eq!(pick_window(&ws, t).unwrap().label, "5h", "t={t}");
+        }
+    }
+
+    #[test]
+    fn test_pick_window_pins_the_worst_of_several_over_the_line() {
+        let ws = [win("5h", 91), win("7d", 20), win("fbl", 99)];
+        assert_eq!(pick_window(&ws, 0).unwrap().label, "fbl");
+    }
+
+    #[test]
+    fn test_pick_window_just_below_the_pin_still_rotates() {
+        let ws = [win("5h", PIN_PCT - 1), win("7d", 20)];
+        assert_eq!(pick_window(&ws, 0).unwrap().label, "5h");
+        assert_eq!(pick_window(&ws, ROTATE_SECS).unwrap().label, "7d");
+    }
+
+    #[test]
+    fn test_pick_window_empty_is_none() {
+        assert_eq!(pick_window(&[], 0), None);
+        assert_eq!(pick_window(&[], 12_345), None);
+    }
+
+    #[test]
+    fn test_rate_windows_collects_only_what_is_present() {
+        let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
+        let ws = rate_windows(&input, RoundingMode::Floor, fable(51));
+        assert_eq!(
+            ws.iter().map(|w| w.label).collect::<Vec<_>>(),
+            ["5h", "7d", "fbl"]
+        );
+        assert_eq!(ws[2].pct, 51);
+
+        // No fable cache → two windows, and the wheel is that much shorter.
+        let ws = rate_windows(&input, RoundingMode::Floor, None);
+        assert_eq!(ws.len(), 2);
+
+        // No rate_limits block at all (API billing) → nothing to rotate.
+        let api: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
+        assert!(rate_windows(&api, RoundingMode::Floor, fable(51)).is_empty());
+    }
+
+    #[test]
+    fn test_rotating_row_shows_a_countdown_not_a_clock_time() {
+        let mut out = String::new();
+        let now = 1_700_000_000;
+        push_rate_rotating(
+            RateWindow {
+                label: "5h",
+                pct: 96,
+                resets_at: Some(now + 2 * 3600 + 11 * 60),
+            },
+            now,
+            &mut out,
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("5h 96%"), "{plain}");
+        assert!(plain.contains("2h11m"), "countdown missing: {plain}");
+        assert!(!plain.contains("am") && !plain.contains("pm"), "{plain}");
+    }
+
+    #[test]
+    fn test_rotating_row_omits_a_reset_already_in_the_past() {
+        let mut out = String::new();
+        push_rate_rotating(
+            RateWindow {
+                label: "7d",
+                pct: 12,
+                resets_at: Some(500),
+            },
+            1_000,
+            &mut out,
+        );
+        assert!(!strip_ansi(&out).contains('⟳'), "{out:?}");
+    }
+
     // ── Fable weekly cap ──────────────────────────────────────────────────────
 
     const RATE_LIMITED: &str = r#"{
@@ -1379,6 +1541,7 @@ mod tests {
 
     #[test]
     fn test_render_fable_inline_condensed_stays_single_line() {
+        // 95% pins the slot, so this doesn't ride on where the rotation is.
         let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
         let out = render(
             &input,
@@ -1388,11 +1551,11 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
-            fable(51),
+            fable(95),
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("fbl"), "fable label missing: {plain}");
-        assert!(plain.contains("51%"), "fable pct missing: {plain}");
+        assert!(plain.contains("95%"), "fable pct missing: {plain}");
         assert!(!out.contains('\n'), "condensed must stay single-line");
     }
 
@@ -1618,8 +1781,8 @@ mod tests {
             "server-provided used_percentage wins"
         );
         assert!(plain.contains("project"), "cwd dirname should render");
-        assert!(plain.contains("5h"), "5h rate label should render");
-        assert!(plain.contains("7d"), "7d rate label should render");
+        let shown = ["5h", "7d"].iter().filter(|l| plain.contains(**l)).count();
+        assert_eq!(shown, 1, "one rotating window, got: {plain}");
         assert!(
             !plain.contains("current"),
             "comfortable label should not appear"
