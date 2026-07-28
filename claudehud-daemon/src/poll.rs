@@ -14,7 +14,7 @@
 use std::time::Duration;
 
 /// Outcome of one conditional GET against a polled source.
-pub enum FetchOutcome {
+pub(crate) enum FetchOutcome {
     /// Server replied 304 — body unchanged since the supplied etag.
     NotModified,
     /// Fresh body, plus the new etag to send on the next request (if any).
@@ -25,7 +25,7 @@ pub enum FetchOutcome {
 ///
 /// Implementors map an optional `If-None-Match` etag to either
 /// [`FetchOutcome::NotModified`] (304) or a fresh [`FetchOutcome::Body`].
-pub trait ConditionalGet {
+pub(crate) trait ConditionalGet {
     fn fetch(&self, etag: Option<&str>) -> Result<FetchOutcome, String>;
 }
 
@@ -34,13 +34,13 @@ pub trait ConditionalGet {
 /// Returning `false` from [`Clock::sleep`] stops the loop; the real clock always
 /// sleeps and returns `true` (loops forever), while a fake clock can return
 /// `false` to let a test exit after a fixed number of cycles.
-pub trait Clock {
+pub(crate) trait Clock {
     /// Sleep for `dur`. Return `true` to keep polling, `false` to stop.
     fn sleep(&self, dur: Duration) -> bool;
 }
 
 /// The production clock: a real `thread::sleep` that never stops the loop.
-pub struct RealClock;
+pub(crate) struct RealClock;
 
 impl Clock for RealClock {
     fn sleep(&self, dur: Duration) -> bool {
@@ -58,7 +58,7 @@ impl Clock for RealClock {
 ///
 /// `label` prefixes the silent-degradation warnings so the two pollers stay
 /// distinguishable in logs.
-pub fn run_poll_loop<S, C, F>(
+pub(crate) fn run_poll_loop<S, C, F>(
     source: &S,
     clock: &C,
     label: &str,
@@ -95,13 +95,13 @@ pub fn run_poll_loop<S, C, F>(
 }
 
 /// Adapter: a [`ConditionalGet`] backed by a real `ureq` agent fetching one URL.
-pub struct UreqSource {
+pub(crate) struct UreqSource {
     agent: ureq::Agent,
     url: &'static str,
 }
 
 impl UreqSource {
-    pub fn new(agent: ureq::Agent, url: &'static str) -> Self {
+    pub(crate) fn new(agent: ureq::Agent, url: &'static str) -> Self {
         Self { agent, url }
     }
 }
@@ -217,7 +217,7 @@ mod tests {
             &clock,
             "test",
             Some(Duration::from_secs(7)),
-            Duration::from_secs(300),
+            Duration::from_mins(5),
             |body| acted.borrow_mut().push(body.to_string()),
         );
 
@@ -233,8 +233,8 @@ mod tests {
             clock.slept.borrow().as_slice(),
             &[
                 Duration::from_secs(7),
-                Duration::from_secs(300),
-                Duration::from_secs(300)
+                Duration::from_mins(5),
+                Duration::from_mins(5)
             ]
         );
     }
@@ -257,7 +257,7 @@ mod tests {
             &clock,
             "test",
             None,
-            Duration::from_secs(60),
+            Duration::from_mins(1),
             |body| acted.borrow_mut().push(body.to_string()),
         );
 

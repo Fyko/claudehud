@@ -66,7 +66,7 @@ impl SeqlockRecord for GitStatus {
     const SIZE: usize = MMAP_SIZE;
 
     fn encode(&self, payload: &mut [u8]) {
-        payload[0] = self.dirty as u8;
+        payload[0] = u8::from(self.dirty);
         let bytes = self.branch.as_bytes();
         let len = bytes.len().min(BRANCH_MAX);
         payload[1] = len as u8;
@@ -87,7 +87,7 @@ pub fn hash_path(path: &Path) -> u32 {
     let bytes = path.as_os_str().as_encoded_bytes();
     let mut hash: u32 = 2_166_136_261;
     for &b in bytes {
-        hash ^= b as u32;
+        hash ^= u32::from(b);
         hash = hash.wrapping_mul(16_777_619);
     }
     hash

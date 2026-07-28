@@ -20,12 +20,12 @@ use common::fable::{fable_limit_path, format_fable_limit, FableLimit};
 use crate::poll::{ConditionalGet, FetchOutcome};
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
-const POLL_INTERVAL: Duration = Duration::from_secs(300);
+const POLL_INTERVAL: Duration = Duration::from_mins(5);
 const USER_AGENT: &str = concat!("claudehud-daemon/", env!("CARGO_PKG_VERSION"));
 
 /// Entry point for the fable-polling thread. Returns immediately (thread ends)
 /// when the feature is off, so `main` can spawn it unconditionally.
-pub fn start() {
+pub(crate) fn start() {
     if !common::config::load().fable {
         return;
     }
@@ -245,7 +245,7 @@ mod tests {
         run_fable_poll(
             &source,
             &FakeClock::keep_for(0),
-            Duration::from_secs(300),
+            Duration::from_mins(5),
             &path,
         );
 

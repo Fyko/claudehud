@@ -10,12 +10,12 @@ use sha2::{Digest, Sha256};
 
 const RELEASES_API: &str = "https://api.github.com/repos/fyko/claudehud/releases/latest";
 const USER_AGENT: &str = concat!("claudehud-daemon/", env!("CARGO_PKG_VERSION"));
-const FIRST_DELAY: Duration = Duration::from_secs(60);
-const POLL_INTERVAL: Duration = Duration::from_secs(300);
+const FIRST_DELAY: Duration = Duration::from_mins(1);
+const POLL_INTERVAL: Duration = Duration::from_mins(5);
 
 /// The release-asset target triple for the current platform. `None` on
 /// unsupported / not-yet-implemented platforms (e.g. Windows in v1).
-pub fn target_triple() -> Option<&'static str> {
+pub(crate) fn target_triple() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
         ("macos", "x86_64") => Some("x86_64-apple-darwin"),
@@ -31,7 +31,7 @@ pub fn target_triple() -> Option<&'static str> {
 /// - `pin` absent → target `latest`.
 ///
 /// Returns `Some(tag)` only when the target is strictly newer than `installed`.
-pub fn decide_target(installed: &str, latest: &str, pin: Option<&str>) -> Option<String> {
+pub(crate) fn decide_target(installed: &str, latest: &str, pin: Option<&str>) -> Option<String> {
     let target = pin.unwrap_or(latest);
     match compare(installed, target) {
         VersionState::Newer(_) => Some(target.to_string()),
@@ -41,13 +41,13 @@ pub fn decide_target(installed: &str, latest: &str, pin: Option<&str>) -> Option
 
 /// True if `exe` looks like a real install (not a `cargo` build dir). Guards
 /// against a dev binary self-updating.
-pub fn is_installed_path(exe: &Path) -> bool {
+pub(crate) fn is_installed_path(exe: &Path) -> bool {
     !exe.components().any(|c| c.as_os_str() == "target")
 }
 
 /// Entry point for the autoupdate thread. Returns (thread exits) when
 /// autoupdate is disabled, on a dev build, or for an unsupported platform.
-pub fn start() {
+pub(crate) fn start() {
     // Never self-update a debug/dev build.
     if cfg!(debug_assertions) {
         return;
@@ -206,11 +206,11 @@ fn download_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {
 fn verify_sha256(bytes: &[u8], expected_hex: &str) -> bool {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    let actual: String = hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let mut actual = String::new();
+    for b in hasher.finalize() {
+        use std::fmt::Write;
+        let _ = write!(actual, "{b:02x}");
+    }
     !expected_hex.is_empty() && actual.eq_ignore_ascii_case(expected_hex)
 }
 
@@ -337,8 +337,8 @@ mod tests {
             Path::new("/does/not/matter"),
             "x86_64-unknown-linux-musl",
             None,
-            Duration::from_secs(60),
-            Duration::from_secs(300),
+            Duration::from_mins(1),
+            Duration::from_mins(5),
         );
 
         // First request unconditional; second carried the etag from cycle 1.
@@ -350,9 +350,9 @@ mod tests {
         assert_eq!(
             clock.slept.borrow().as_slice(),
             &[
-                Duration::from_secs(60),
-                Duration::from_secs(300),
-                Duration::from_secs(300)
+                Duration::from_mins(1),
+                Duration::from_mins(5),
+                Duration::from_mins(5)
             ]
         );
     }

@@ -11,6 +11,36 @@ common = { path = "common" }
 memmap2 = "0.9"
 serde_json = "1"
 
+[workspace.lints.rust]
+unsafe_code = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -2 }
+# Allowed pedantic lints, matching the Astral workspace defaults.
+char_lit_as_u8 = "allow"
+collapsible_else_if = "allow"
+collapsible_if = "allow"
+implicit_hasher = "allow"
+map_unwrap_or = "allow"
+match_same_arms = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+similar_names = "allow"
+single_match_else = "allow"
+struct_excessive_bools = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+used_underscore_binding = "allow"
+# Every cast in here is percent (0-100), dot-count, or unix-epoch math whose
+# range we already clamp. try_from + unwrap at each site buys nothing.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+
 [profile.release]
 opt-level = 3
 lto = true

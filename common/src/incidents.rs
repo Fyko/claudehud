@@ -117,16 +117,16 @@ impl SeqlockRecord for IncidentSet {
     }
 }
 
-/// Returns (stored_incidents, total_active_count).
-/// stored_incidents.len() <= min(total_active_count, MAX_STORED_INCIDENTS).
+/// Returns (`stored_incidents`, `total_active_count`).
+/// `stored_incidents.len()` <= `min(total_active_count`, `MAX_STORED_INCIDENTS`).
 /// Returns (vec![], 0) when no active incidents or mmap too small.
 pub fn seqlock_read_incidents(mmap: &[u8]) -> (Vec<Incident>, u8) {
     let IncidentSet { incidents, total } = seqlock::read::<IncidentSet>(mmap).unwrap_or_default();
     (incidents, total)
 }
 
-/// Writes up to MAX_STORED_INCIDENTS from `incidents` into the seqlock mmap.
-/// `total` is the full count of active incidents (may exceed MAX_STORED_INCIDENTS).
+/// Writes up to `MAX_STORED_INCIDENTS` from `incidents` into the seqlock mmap.
+/// `total` is the full count of active incidents (may exceed `MAX_STORED_INCIDENTS`).
 pub fn seqlock_write_incidents(buf: &mut [u8], incidents: &[Incident], total: u8) {
     seqlock::write(
         buf,

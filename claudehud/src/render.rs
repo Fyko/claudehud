@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use common::fable::FableLimit;
 use common::incidents::Incident;
 
-use crate::fmt::{self, *};
+use crate::fmt::{self, color_for_pct, BLUE, CYAN, DIM, GREEN, RED, RESET, SEP};
 use crate::input::Input;
 use crate::time::{format_countdown, format_duration, format_reset_time, ResetStyle};
 
@@ -60,7 +60,9 @@ impl Layout {
 
 // One flat argument list rather than a params struct: every caller is either
 // `orchestrate::run` or a test that wants to vary exactly one of these.
-#[allow(clippy::too_many_arguments)]
+// `git` comes in owned because no caller wants it back; borrowing would only
+// push a `let` binding into every one of them.
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub fn render(
     input: &Input,
     git: Option<(String, bool)>,
@@ -75,7 +77,7 @@ pub fn render(
     match layout {
         Layout::Comfortable => render_comfortable(
             input,
-            git,
+            git.as_ref(),
             incidents,
             total_active,
             update_notice,
@@ -85,7 +87,7 @@ pub fn render(
         ),
         Layout::Condensed => render_condensed(
             input,
-            git,
+            git.as_ref(),
             incidents,
             total_active,
             update_notice,
@@ -99,7 +101,7 @@ pub fn render(
 #[allow(clippy::too_many_arguments)]
 fn render_comfortable(
     input: &Input,
-    git: Option<(String, bool)>,
+    git: Option<&(String, bool)>,
     incidents: &[Incident],
     total_active: u8,
     update_notice: Option<&str>,
@@ -124,7 +126,7 @@ fn render_comfortable(
 
     // ── Dir + git ──────────────────────────────────────────
     out.push_str(SEP);
-    push_dir_branch(input, git.as_ref(), false, &mut out);
+    push_dir_branch(input, git, false, &mut out);
 
     // ── Incident lines (between line 1 and rate limits) ────
     push_incidents(incidents, total_active, &mut out);
@@ -169,7 +171,7 @@ fn render_comfortable(
 #[allow(clippy::too_many_arguments)]
 fn render_condensed(
     input: &Input,
-    git: Option<(String, bool)>,
+    git: Option<&(String, bool)>,
     incidents: &[Incident],
     total_active: u8,
     update_notice: Option<&str>,
@@ -194,7 +196,7 @@ fn render_condensed(
 
     // ── Dir + git (tight) ──────────────────────────────────
     out.push_str(SEP);
-    push_dir_branch(input, git.as_ref(), true, &mut out);
+    push_dir_branch(input, git, true, &mut out);
 
     // ── Rate limits: one rotating slot ─────────────────────
     // Three windows side by side ate ~84 columns. One at a time buys a full
@@ -1842,6 +1844,7 @@ mod tests {
         }
     }"#;
 
+    #[allow(clippy::unnecessary_wraps)]
     fn fable(percent: u8) -> Option<FableLimit> {
         Some(FableLimit {
             percent,

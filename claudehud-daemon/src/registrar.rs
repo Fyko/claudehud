@@ -8,11 +8,12 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 /// Watch /tmp/clhud-watch/ for new marker files. Each file contains an absolute
 /// path as UTF-8 bytes. Sends each path to `tx` for the watcher to pick up.
 /// Also drains any existing marker files on startup (handles daemon restarts).
-pub fn start(tx: Sender<PathBuf>) {
+pub(crate) fn start(tx: &Sender<PathBuf>) {
     let dir = watch_dir();
     fs::create_dir_all(&dir).expect("failed to create clhud-watch dir");
 
     let tx2 = tx.clone();
+
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
             if let Ok(event) = res {
@@ -36,7 +37,7 @@ pub fn start(tx: Sender<PathBuf>) {
     // Duplicates are safe — the consumer deduplicates by git root.
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
-            send_path_from_marker(&entry.path(), &tx);
+            send_path_from_marker(&entry.path(), tx);
         }
     }
 

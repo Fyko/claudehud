@@ -56,12 +56,9 @@ pub fn run(mut args: Arguments) -> ExitCode {
     let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
     let home = resolve_home_dir();
 
-    let settings_path = match resolve_settings_path(explicit, config_dir, home) {
-        Some(p) => p,
-        None => {
-            eprintln!("claudehud install: cannot locate settings.json (no --settings, $CLAUDE_CONFIG_DIR, or $HOME)");
-            return ExitCode::from(1);
-        }
+    let Some(settings_path) = resolve_settings_path(explicit, config_dir, home) else {
+        eprintln!("claudehud install: cannot locate settings.json (no --settings, $CLAUDE_CONFIG_DIR, or $HOME)");
+        return ExitCode::from(1);
     };
 
     // statusLine command in settings.json is parsed as a shell command. Quote
@@ -210,7 +207,7 @@ fn atomic_write(path: &Path, contents: &str) -> io::Result<()> {
 fn tempfile_path(target: &Path) -> PathBuf {
     let mut name = target
         .file_name()
-        .map(|s| s.to_os_string())
+        .map(std::ffi::OsStr::to_os_string)
         .unwrap_or_else(|| "settings.json".into());
     name.push(".claudehud-tmp");
     target.with_file_name(name)

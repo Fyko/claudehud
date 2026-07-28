@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_minimal() {
-        let json = r#"{}"#;
+        let json = r"{}";
         let input: Input = serde_json::from_str(json).unwrap();
         assert!(input.model.is_none());
         assert!(input.cwd.is_none());

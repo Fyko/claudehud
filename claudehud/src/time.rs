@@ -1,3 +1,4 @@
+#[derive(Clone, Copy)]
 pub enum ResetStyle {
     Time,
     DateTime,
@@ -48,7 +49,7 @@ fn days_since_epoch(year: i64, month: i64, day: i64) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let y = year - (month <= 2) as i64;
+    let y = year - i64::from(month <= 2);
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400;
     let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
@@ -62,7 +63,7 @@ pub fn format_duration(secs: u64) -> String {
     } else if secs >= 60 {
         format!("{}m", secs / 60)
     } else {
-        format!("{}s", secs)
+        format!("{secs}s")
     }
 }
 

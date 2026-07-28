@@ -55,7 +55,7 @@ fn main() -> ExitCode {
     let tx2 = tx.clone();
 
     std::thread::spawn(move || {
-        registrar::start(tx2);
+        registrar::start(&tx2);
     });
 
     std::thread::spawn(|| {
@@ -72,7 +72,7 @@ fn main() -> ExitCode {
     });
 
     // watcher::start runs the main event loop — blocks until channel closes
-    watcher::start(rx);
+    watcher::start(&rx);
 
     ExitCode::SUCCESS
 }

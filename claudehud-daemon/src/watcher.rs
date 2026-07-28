@@ -11,7 +11,7 @@ use common::{find_git_root, resolve_gitdir};
 /// (handles worktree `.git`-as-file pointers), watch `<gitdir>/index` +
 /// `<gitdir>/HEAD`, and call `cache::update` on every FS change for every
 /// cwd registered against that gitdir.
-pub fn start(rx: Receiver<PathBuf>) {
+pub(crate) fn start(rx: &Receiver<PathBuf>) {
     let (event_tx, event_rx) = crossbeam_channel::unbounded::<PathBuf>();
 
     let mut watcher = RecommendedWatcher::new(
@@ -124,7 +124,7 @@ mod tests {
         );
 
         let (tx, rx) = unbounded();
-        let watcher_thread = std::thread::spawn(move || start(rx));
+        let watcher_thread = std::thread::spawn(move || start(&rx));
         tx.send(wt.clone()).unwrap();
 
         let bin = mmap_path_in(cache.path(), hash_path(&wt));

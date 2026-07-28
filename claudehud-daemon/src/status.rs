@@ -8,11 +8,11 @@ use std::path::Path;
 use std::time::Duration;
 
 const FEED_URL: &str = "https://status.claude.com/history.atom";
-const POLL_INTERVAL: Duration = Duration::from_secs(300);
+const POLL_INTERVAL: Duration = Duration::from_mins(5);
 const USER_AGENT: &str = concat!("claudehud-daemon/", env!("CARGO_PKG_VERSION"));
 
 /// Main entry point for the status-polling thread. Loops forever.
-pub fn start() {
+pub(crate) fn start() {
     let agent = ureq::AgentBuilder::new()
         .user_agent(USER_AGENT)
         .timeout_connect(Duration::from_secs(5))
@@ -61,6 +61,7 @@ pub(crate) fn write_incidents_to_path(path: &Path, incidents: &[Incident], total
         return;
     }
     // Safety: freshly opened, sized, exclusive writer — readers use seqlock.
+    #[allow(unsafe_code)]
     let mut mmap = match unsafe { MmapMut::map_mut(&file) } {
         Ok(m) if m.len() >= INCIDENTS_MMAP_SIZE => m,
         _ => return,
@@ -90,11 +91,11 @@ fn severity_from_term(term: &str) -> Severity {
 }
 
 #[cfg(test)]
-pub fn parse_atom(xml: &str) -> (Vec<Incident>, u8) {
+pub(crate) fn parse_atom(xml: &str) -> (Vec<Incident>, u8) {
     parse_atom_result(xml).unwrap_or_default()
 }
 
-/// Returns (active_incidents sorted by updated_at desc, total_count).
+/// Returns (`active_incidents` sorted by `updated_at` desc, `total_count`).
 /// Distinguishes XML parse failure (retain prior mmap state) from "no active
 /// incidents" (Ok with empty vec), which clears the mmap.
 fn extract_phase_from_html(html: &str) -> Option<&str> {
@@ -217,7 +218,7 @@ pub(crate) fn parse_iso8601_secs(s: &str) -> Option<u64> {
         sign * (h * 3600 + m * 60)
     };
 
-    let y = year - (month <= 2) as i64;
+    let y = year - i64::from(month <= 2);
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400;
     let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
@@ -485,6 +486,7 @@ mod tests {
         super::write_incidents_to_path(&path, &incidents, 2);
 
         let file = File::open(&path).unwrap();
+        #[allow(unsafe_code)]
         let mmap = unsafe { memmap2::Mmap::map(&file) }.unwrap();
         assert_eq!(mmap.len(), INCIDENTS_MMAP_SIZE);
         let (got, total) = seqlock_read_incidents(&mmap);

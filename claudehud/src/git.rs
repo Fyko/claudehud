@@ -8,7 +8,7 @@ use common::{
 };
 use memmap2::Mmap;
 
-/// Returns (branch, is_dirty) for the git repo containing `cwd`.
+/// Returns (branch, `is_dirty`) for the git repo containing `cwd`.
 /// Fast path: reads from daemon mmap file (~10µs).
 /// Slow path (first render or daemon not running): registers path + runs git.
 pub fn branch_and_dirty(cwd: &Path) -> Option<(String, bool)> {
@@ -56,6 +56,7 @@ fn try_mmap_read(hash: u32) -> Option<(String, bool)> {
     // Safety: `file` holds the fd open; even if the daemon unlinks and
     // recreates the path on disk, we map the original inode, so the
     // MMAP_SIZE check above is sufficient to validate the buffer layout.
+    #[allow(unsafe_code)]
     let mmap = unsafe { Mmap::map(&file) }.ok()?;
     let (branch, dirty) = seqlock_read(&mmap);
     if branch.is_empty() {
@@ -123,7 +124,7 @@ pub fn resolve_base_repo(input: &Input, cwd: &Path) -> Option<String> {
         return Path::new(original_cwd)
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
     }
 
     // Path B: the harness already knows both halves of the answer.
@@ -164,7 +165,7 @@ pub fn resolve_base_repo(input: &Input, cwd: &Path) -> Option<String> {
         .parent()?
         .file_name()
         .and_then(|n| n.to_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
 }
 
 #[cfg(test)]

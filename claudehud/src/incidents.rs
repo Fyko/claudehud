@@ -4,24 +4,23 @@ use std::path::Path;
 use common::incidents::{incidents_path, seqlock_read_incidents, Incident, INCIDENTS_MMAP_SIZE};
 use memmap2::Mmap;
 
-/// Returns (stored_incidents, total_active_count).
+/// Returns (`stored_incidents`, `total_active_count`).
 pub fn read_incidents() -> (Vec<Incident>, u8) {
     read_incidents_from(&incidents_path())
 }
 
 pub fn read_incidents_from(path: &Path) -> (Vec<Incident>, u8) {
-    let file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return (vec![], 0),
+    let Ok(file) = fs::File::open(path) else {
+        return (vec![], 0);
     };
     if file.metadata().ok().map(|m| m.len()) != Some(INCIDENTS_MMAP_SIZE as u64) {
         return (vec![], 0);
     }
     // Safety: `file` holds the fd open; the daemon uses a seqlock protocol
     // so concurrent writes are safe to observe.
-    let mmap = match unsafe { Mmap::map(&file) } {
-        Ok(m) => m,
-        Err(_) => return (vec![], 0),
+    #[allow(unsafe_code)]
+    let Ok(mmap) = (unsafe { Mmap::map(&file) }) else {
+        return (vec![], 0);
     };
     seqlock_read_incidents(&mmap)
 }
