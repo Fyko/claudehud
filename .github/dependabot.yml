@@ -5,8 +5,14 @@ updates:
     schedule:
       interval: weekly
     versioning-strategy: lockfile-only
+    # Let a release age a week before we take it; catches the yanked-in-a-day
+    # and compromised-publish cases without any work on our part.
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
