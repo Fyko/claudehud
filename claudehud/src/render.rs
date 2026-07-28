@@ -122,7 +122,7 @@ fn render_comfortable(
     push_dir_branch(input, git.as_ref(), false, &mut out);
 
     // ── Incident lines (between line 1 and rate limits) ────
-    push_incidents(incidents, total_active, true, &mut out);
+    push_incidents(incidents, total_active, &mut out);
     push_update_notice(update_notice, &mut out);
 
     // ── Rate limits ────────────────────────────────────────
@@ -200,7 +200,7 @@ fn render_condensed(
     }
 
     // ── Incidents ──────────────────────────────────────────
-    push_incidents(incidents, total_active, false, &mut out);
+    push_incidents(incidents, total_active, &mut out);
     push_update_notice(update_notice, &mut out);
 
     out
@@ -311,7 +311,31 @@ fn push_model_short(input: &Input, out: &mut String) {
     out.push_str(BLUE);
     out.push_str(short);
     out.push_str(RESET);
+    // The dropped parenthetical is usually noise, but an extended context
+    // window changes what the context percentage means — keep that bit.
+    if is_extended_context(input) {
+        out.push_str(DIM);
+        out.push_str(" (1M)");
+        out.push_str(RESET);
+    }
     push_effort(input, out);
+}
+
+/// Whether this session runs an extended (1M) context window. The display name
+/// carries it (`Opus 5 (1M context)`); the window size is the fallback for
+/// payloads whose name doesn't say so.
+fn is_extended_context(input: &Input) -> bool {
+    let named = input
+        .model
+        .as_ref()
+        .and_then(|m| m.display_name.as_deref())
+        .is_some_and(|n| n.to_ascii_lowercase().contains("1m"));
+    named
+        || input
+            .context_window
+            .as_ref()
+            .and_then(|cw| cw.context_window_size)
+            .is_some_and(|size| size >= 1_000_000)
 }
 
 fn push_model_full(input: &Input, out: &mut String) {
@@ -344,7 +368,7 @@ fn push_effort(input: &Input, out: &mut String) {
         return;
     }
     out.push(' ');
-    out.push_str(DIM);
+    out.push_str(fmt::color_for_effort(level));
     out.push_str(level);
     out.push_str(RESET);
 }
@@ -409,42 +433,34 @@ fn push_dir_branch(input: &Input, git: Option<&(String, bool)>, tight: bool, out
     }
 }
 
-/// How an incident should surface, given the layout and its age.
+/// How an incident should surface, given its age.
 #[derive(Debug, PartialEq, Eq)]
 enum IncidentSlot {
     /// Ordinary fresh incident — render the normal line.
     Normal,
-    /// ≥24h old — drop the line, tally toward the breadcrumb (comfortable only).
+    /// ≥24h old — drop the line, tally toward the breadcrumb.
     LongRunning,
-    /// Drop it entirely, no trace (condensed swallows long-running incidents).
-    Hidden,
 }
 
-fn classify_incident(inc: &Incident, now: u64, comfortable: bool) -> IncidentSlot {
+fn classify_incident(inc: &Incident, now: u64) -> IncidentSlot {
     if now.saturating_sub(inc.started_at) < LONG_RUNNING_SECS {
         IncidentSlot::Normal
-    } else if comfortable {
-        IncidentSlot::LongRunning
     } else {
-        IncidentSlot::Hidden
+        IncidentSlot::LongRunning
     }
 }
 
-fn push_incidents(incidents: &[Incident], total_active: u8, comfortable: bool, out: &mut String) {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+fn push_incidents(incidents: &[Incident], total_active: u8, out: &mut String) {
+    let now = now_secs();
 
     let mut long_running: u8 = 0;
     for inc in incidents {
-        match classify_incident(inc, now, comfortable) {
+        match classify_incident(inc, now) {
             IncidentSlot::Normal => {
                 out.push('\n');
                 push_incident_line(inc, now, out);
             }
             IncidentSlot::LongRunning => long_running += 1,
-            IncidentSlot::Hidden => {}
         }
     }
 
@@ -1204,8 +1220,8 @@ mod tests {
     }
 
     #[test]
-    fn test_long_running_hidden_condensed() {
-        // ≥24h in condensed → gone, no breadcrumb.
+    fn test_long_running_breadcrumb_condensed() {
+        // ≥24h in condensed → line hidden, but the count still surfaces.
         let inc = incident_aged("Elevated API errors", 30 * 3600);
         let out = render(
             &Input::default(),
@@ -1220,8 +1236,8 @@ mod tests {
         let plain = strip_ansi(&out);
         assert!(!plain.contains("Elevated API errors"), "{plain}");
         assert!(
-            !plain.contains("ongoing (24h+)"),
-            "no breadcrumb in condensed: {plain}"
+            plain.contains("+1 ongoing (24h+)"),
+            "breadcrumb missing in condensed: {plain}"
         );
     }
 
@@ -1247,18 +1263,24 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_incident_matrix() {
+    fn test_classify_incident_is_purely_about_age() {
         let now = now_secs();
-        let fresh = incident_aged("Elevated API errors", 60);
-        let stale = incident_aged("Elevated API errors", 30 * 3600);
-
-        assert_eq!(classify_incident(&fresh, now, true), IncidentSlot::Normal);
-        assert_eq!(classify_incident(&fresh, now, false), IncidentSlot::Normal);
         assert_eq!(
-            classify_incident(&stale, now, true),
+            classify_incident(&incident_aged("Elevated API errors", 60), now),
+            IncidentSlot::Normal
+        );
+        assert_eq!(
+            classify_incident(&incident_aged("Elevated API errors", 30 * 3600), now),
             IncidentSlot::LongRunning
         );
-        assert_eq!(classify_incident(&stale, now, false), IncidentSlot::Hidden);
+        // Exactly at the cutoff it's already long-running.
+        assert_eq!(
+            classify_incident(
+                &incident_aged("Elevated API errors", LONG_RUNNING_SECS),
+                now
+            ),
+            IncidentSlot::LongRunning
+        );
     }
 
     // ── Fast mode + effort ────────────────────────────────────────────────────
@@ -1282,7 +1304,8 @@ mod tests {
             let model_end = if layout == Layout::Comfortable {
                 "Opus 5 (1M context) xhigh"
             } else {
-                "Opus 5 xhigh"
+                // Condensed drops the parenthetical but keeps the 1M marker.
+                "Opus 5 (1M) xhigh"
             };
             assert!(plain.contains(model_end), "{layout:?}: {plain}");
         }
@@ -1386,6 +1409,104 @@ mod tests {
         ));
         assert!(plain.starts_with("🤖"), "{plain}");
         assert!(plain.contains("⚡ Opus 5"), "{plain}");
+    }
+
+    #[test]
+    fn test_render_1m_marker_condensed_only() {
+        let json = r#"{"model": {"display_name": "Opus 5 (1M context)"}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+
+        let condensed = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            None,
+        ));
+        assert!(condensed.starts_with("Opus 5 (1M) │"), "{condensed}");
+
+        // Comfortable keeps the harness's own wording — no double marker.
+        let comfortable = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+            None,
+        ));
+        assert!(
+            comfortable.starts_with("Opus 5 (1M context) │"),
+            "{comfortable}"
+        );
+    }
+
+    #[test]
+    fn test_render_no_1m_marker_on_a_standard_window() {
+        let json = r#"{
+            "model": {"display_name": "Opus 5"},
+            "context_window": {"context_window_size": 200000}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            None,
+        ));
+        assert!(!plain.contains("1M"), "{plain}");
+    }
+
+    #[test]
+    fn test_render_1m_marker_from_window_size_when_name_is_silent() {
+        let json = r#"{
+            "model": {"display_name": "Opus 5"},
+            "context_window": {"context_window_size": 1000000}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            None,
+        ));
+        assert!(plain.starts_with("Opus 5 (1M) │"), "{plain}");
+    }
+
+    #[test]
+    fn test_render_breadcrumb_counts_every_stale_incident_in_both_layouts() {
+        let incidents = vec![
+            incident_aged("Old thing", 30 * 3600),
+            incident_aged("Older thing", 50 * 3600),
+            incident_aged("Fresh thing", 5 * 60),
+        ];
+        for layout in [Layout::Comfortable, Layout::Condensed] {
+            let plain = strip_ansi(&render(
+                &Input::default(),
+                None,
+                &incidents,
+                3,
+                None,
+                RoundingMode::Floor,
+                layout,
+                None,
+            ));
+            assert!(plain.contains("Fresh thing"), "{layout:?}: {plain}");
+            assert!(!plain.contains("Old thing"), "{layout:?}: {plain}");
+            assert!(plain.contains("+2 ongoing (24h+)"), "{layout:?}: {plain}");
+        }
     }
 
     // ── Rotating usage slot ───────────────────────────────────────────────────

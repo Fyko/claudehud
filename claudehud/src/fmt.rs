@@ -41,6 +41,19 @@ pub fn color_for_cost(usd: f64) -> &'static str {
     }
 }
 
+/// Effort colored by what it costs you, on the same green→red ladder as usage.
+/// `low` stays dim — it's a step down, not something to flag. An unrecognized
+/// level (a new tier someday) renders dim rather than guessing at a tier.
+pub fn color_for_effort(level: &str) -> &'static str {
+    match level.to_ascii_lowercase().as_str() {
+        "medium" => GREEN,
+        "high" => YELLOW,
+        "xhigh" => ORANGE,
+        "max" => RED,
+        _ => DIM,
+    }
+}
+
 use common::incidents::Severity;
 
 pub fn color_for_severity(sev: Severity) -> &'static str {
@@ -119,6 +132,24 @@ mod tests {
         assert_eq!(color_for_cost(19.99), ORANGE);
         assert_eq!(color_for_cost(20.0), RED);
         assert_eq!(color_for_cost(1000.0), RED);
+    }
+
+    #[test]
+    fn test_color_for_effort_ladder() {
+        assert_eq!(color_for_effort("low"), DIM);
+        assert_eq!(color_for_effort("medium"), GREEN);
+        assert_eq!(color_for_effort("high"), YELLOW);
+        assert_eq!(color_for_effort("xhigh"), ORANGE);
+        assert_eq!(color_for_effort("max"), RED);
+    }
+
+    #[test]
+    fn test_color_for_effort_is_case_insensitive_and_safe_on_unknowns() {
+        assert_eq!(color_for_effort("XHIGH"), ORANGE);
+        assert_eq!(color_for_effort("Max"), RED);
+        // A tier we've never heard of shouldn't get an alarming color.
+        assert_eq!(color_for_effort("ludicrous"), DIM);
+        assert_eq!(color_for_effort(""), DIM);
     }
 
     #[test]
