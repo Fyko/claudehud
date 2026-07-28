@@ -126,6 +126,12 @@ pub fn run(mut args: Arguments) -> ExitCode {
     }
 }
 
+/// Seconds between forced re-runs of the statusline. Claude Code's own updates
+/// are event-driven, so without this the HUD freezes whenever the session goes
+/// quiet — and half of what it shows is time-based: rate-limit countdowns, the
+/// rotating usage slot, incident ages.
+const REFRESH_INTERVAL_SECS: u64 = 2;
+
 fn set_statusline_command(value: Value, command: &str) -> Value {
     let mut obj = match value {
         Value::Object(m) => m,
@@ -134,6 +140,10 @@ fn set_statusline_command(value: Value, command: &str) -> Value {
     let mut sl = serde_json::Map::new();
     sl.insert("type".to_string(), Value::String("command".to_string()));
     sl.insert("command".to_string(), Value::String(command.to_string()));
+    sl.insert(
+        "refreshInterval".to_string(),
+        Value::Number(REFRESH_INTERVAL_SECS.into()),
+    );
     obj.insert("statusLine".to_string(), Value::Object(sl));
     Value::Object(obj)
 }
@@ -372,6 +382,20 @@ mod tests {
         assert_eq!(got["statusLine"]["command"], "/bin/claudehud");
         // /doctor requires statusLine.type == "command"
         assert_eq!(got["statusLine"]["type"], "command");
+        // Without a timer the HUD's countdowns and rotation stall when idle.
+        assert_eq!(got["statusLine"]["refreshInterval"], 2);
+    }
+
+    #[test]
+    fn set_replaces_a_stale_refresh_interval() {
+        // The whole statusLine object is rewritten, so an older install's
+        // value (or none at all) doesn't survive.
+        let v: Value = serde_json::from_str(
+            r#"{"statusLine":{"command":"/old","type":"command","refreshInterval":60}}"#,
+        )
+        .unwrap();
+        let got = set_statusline_command(v, "/new");
+        assert_eq!(got["statusLine"]["refreshInterval"], 2);
     }
 
     #[test]

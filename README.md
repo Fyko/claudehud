@@ -200,10 +200,17 @@ Or set it by hand:
 ```json
 {
   "statusLine": {
-    "command": "\"$HOME/.local/bin/claudehud\" render"
+    "type": "command",
+    "command": "\"$HOME/.local/bin/claudehud\" render",
+    "refreshInterval": 2
   }
 }
 ```
+
+`refreshInterval` re-runs the command every N seconds on top of Claude Code's
+event-driven updates. Without it the HUD freezes whenever the session goes
+quiet, which strands everything time-based: the rate-limit countdowns, the
+rotating usage slot, and incident ages. `claudehud install` writes it for you.
 
 ### Daemon (macOS launchd)
 
