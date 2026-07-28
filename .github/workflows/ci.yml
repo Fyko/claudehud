@@ -1,74 +1,35 @@
 name: CI
 
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
+  workflow_dispatch:
 
-permissions:
-  contents: read
+# Nothing is granted by default; each callee asks for exactly what it needs.
+permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  check-fmt:
+    uses: ./.github/workflows/check-fmt.yml
+    permissions:
+      contents: read
+
+  check-lint:
+    uses: ./.github/workflows/check-lint.yml
+    permissions:
+      contents: read
+
   test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: "1.95"
-          components: clippy, rustfmt
-
-      - name: Cache Cargo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-ci-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-ci-cargo-
-
-      - name: Format
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Test
-        run: cargo test --workspace --locked
-
-  build-windows:
-    name: Build + Test (Windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: "1.95"
-
-      - name: Cache Cargo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: windows-ci-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: windows-ci-cargo-
-
-      - name: Build
-        run: cargo build --workspace --locked
-
-      - name: Test
-        run: cargo test --workspace --locked
+  check-zizmor:
+    uses: ./.github/workflows/check-zizmor.yml
+    permissions:
+      contents: read

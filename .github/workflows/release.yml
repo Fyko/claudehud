@@ -34,6 +34,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -47,16 +49,10 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y musl-tools
 
-      - name: Cache Cargo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
+      # No build cache here on purpose. A release build publishes signed
+      # artifacts, and the Actions cache is writable from any branch — a
+      # poisoned entry would be baked straight into a tagged binary
+      # (zizmor: cache-poisoning). Release builds are cold builds.
 
       - name: Build
         shell: bash
@@ -127,8 +123,13 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # `gh` ships on the runner, so publishing needs no third-party action in
+      # the path that signs and uploads release binaries (zizmor:
+      # superfluous-actions). The tag goes through the environment rather than
+      # inline interpolation, keeping it out of the shell's parse.
       - name: Publish Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
-        with:
-          files: dist/*
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/* --generate-notes
