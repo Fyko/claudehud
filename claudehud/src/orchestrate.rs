@@ -16,6 +16,7 @@
 
 use std::path::Path;
 
+use common::fable::FableLimit;
 use common::incidents::Incident;
 
 use crate::input::Input;
@@ -39,6 +40,10 @@ pub trait Env {
     /// live notice. The clock is the impl's concern (real wall clock vs. an
     /// injected fixed instant) so callers never touch the system clock.
     fn active_notice(&self) -> Option<String>;
+
+    /// The live **fable cap** the daemon polled, or `None` when the feature is
+    /// off or the window it describes has rolled over.
+    fn fable_limit(&self) -> Option<FableLimit>;
 }
 
 /// Render options resolved by `main()` from CLI args + env before orchestration.
@@ -71,6 +76,7 @@ pub fn run<E: Env>(raw: &str, env: &E, options: Options) -> String {
 
     let (incidents, total_active) = env.read_incidents();
     let update_notice = env.active_notice();
+    let fable = env.fable_limit();
 
     render::render(
         &input,
@@ -80,6 +86,7 @@ pub fn run<E: Env>(raw: &str, env: &E, options: Options) -> String {
         update_notice.as_deref(),
         options.rounding,
         options.layout,
+        fable,
     )
 }
 
@@ -99,6 +106,10 @@ impl Env for SystemEnv {
     fn active_notice(&self) -> Option<String> {
         crate::notice::active_notice()
     }
+
+    fn fable_limit(&self) -> Option<FableLimit> {
+        crate::fable::fable_limit()
+    }
 }
 
 #[cfg(test)]
@@ -111,6 +122,7 @@ mod tests {
         branch: Option<(String, bool)>,
         incidents: (Vec<Incident>, u8),
         notice: Option<String>,
+        fable: Option<FableLimit>,
     }
 
     impl Env for FakeEnv {
@@ -122,6 +134,9 @@ mod tests {
         }
         fn active_notice(&self) -> Option<String> {
             self.notice.clone()
+        }
+        fn fable_limit(&self) -> Option<FableLimit> {
+            self.fable
         }
     }
 

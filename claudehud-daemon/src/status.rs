@@ -190,7 +190,7 @@ fn parse_atom_result(xml: &str) -> Result<(Vec<Incident>, u8), roxmltree::Error>
     Ok((incidents, total))
 }
 
-fn parse_iso8601_secs(s: &str) -> Option<u64> {
+pub(crate) fn parse_iso8601_secs(s: &str) -> Option<u64> {
     let s = s.trim();
     if s.len() < 19 {
         return None;

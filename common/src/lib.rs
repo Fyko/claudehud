@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub mod config;
+pub mod fable;
 pub mod incidents;
 pub mod notice;
 pub mod seqlock;

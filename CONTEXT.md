@@ -24,7 +24,10 @@ A single `│`-delimited piece of the HUD's first line — e.g. the model segmen
 _Avoid_: field, part
 
 **Rate-limit row**:
-A rate-limit bar shown on its own line in the comfortable layout (`current`, `weekly`). Collapses to an inline **rate-limit segment** in the condensed layout.
+A rate-limit bar shown on its own line in the comfortable layout (`current`, `weekly`, `fable`). Collapses to an inline **rate-limit segment** in the condensed layout.
+
+**Fable cap**:
+The weekly-scoped Fable usage window. Unlike the other two rows it isn't in the stdin payload — the daemon polls `/api/oauth/usage` with Claude Code's OAuth token and writes `/tmp/clhud-fable` for the client. Opt-in via `fable=true` in the daemon config.
 
 **Incident line**:
 The hyperlinked line rendered below line 1 when status.claude.com reports an active incident or in-progress maintenance. Not a segment.
@@ -44,3 +47,4 @@ The per-repo mmap-backed file (`/tmp/clhud-{hash}.bin`) holding git status (seql
 - The **Client** renders the **HUD**; Claude Code invokes the client through the **Statusline** seam.
 - The **Daemon** writes the **Cache file**; the **Client** reads it directly — the client never talks to the daemon over a socket.
 - The **Client** registers a repo by writing a **Registration marker**; the **Daemon** then writes that repo's **Cache file**.
+- The **Daemon** polls the **Fable cap** and writes it to a plain file; the **Client** reads it and renders one more **Rate-limit row**.

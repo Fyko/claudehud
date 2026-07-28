@@ -2,6 +2,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use common::fable::FableLimit;
 use common::incidents::Incident;
 
 use crate::fmt::{self, *};
@@ -57,6 +58,9 @@ impl Layout {
     }
 }
 
+// One flat argument list rather than a params struct: every caller is either
+// `orchestrate::run` or a test that wants to vary exactly one of these.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     input: &Input,
     git: Option<(String, bool)>,
@@ -65,14 +69,27 @@ pub fn render(
     update_notice: Option<&str>,
     rounding: RoundingMode,
     layout: Layout,
+    fable: Option<FableLimit>,
 ) -> String {
     match layout {
-        Layout::Comfortable => {
-            render_comfortable(input, git, incidents, total_active, update_notice, rounding)
-        }
-        Layout::Condensed => {
-            render_condensed(input, git, incidents, total_active, update_notice, rounding)
-        }
+        Layout::Comfortable => render_comfortable(
+            input,
+            git,
+            incidents,
+            total_active,
+            update_notice,
+            rounding,
+            fable,
+        ),
+        Layout::Condensed => render_condensed(
+            input,
+            git,
+            incidents,
+            total_active,
+            update_notice,
+            rounding,
+            fable,
+        ),
     }
 }
 
@@ -83,6 +100,7 @@ fn render_comfortable(
     total_active: u8,
     update_notice: Option<&str>,
     rounding: RoundingMode,
+    fable: Option<FableLimit>,
 ) -> String {
     let mut out = String::with_capacity(512);
 
@@ -122,6 +140,20 @@ fn render_comfortable(
                         push_rate_row("weekly ", pct, sd.resets_at, ResetStyle::DateTime, &mut out);
                     }
                 }
+
+                // ponytail: nested under five_hour with the other rows — the
+                // fable cap is a plan-billing number, and plan billing always
+                // brings a five-hour window with it.
+                if let Some(f) = fable {
+                    out.push('\n');
+                    push_rate_row(
+                        "fable  ",
+                        f.percent,
+                        Some(f.resets_at),
+                        ResetStyle::DateTime,
+                        &mut out,
+                    );
+                }
             }
         }
     }
@@ -136,6 +168,7 @@ fn render_condensed(
     total_active: u8,
     update_notice: Option<&str>,
     rounding: RoundingMode,
+    fable: Option<FableLimit>,
 ) -> String {
     let mut out = String::with_capacity(512);
 
@@ -171,6 +204,16 @@ fn render_condensed(
                 out.push_str(SEP);
                 push_rate_inline("7d", pct, sd.resets_at, ResetStyle::DateTime, &mut out);
             }
+        }
+        if let Some(f) = fable {
+            out.push_str(SEP);
+            push_rate_inline(
+                "fbl",
+                f.percent,
+                Some(f.resets_at),
+                ResetStyle::DateTime,
+                &mut out,
+            );
         }
     }
 
@@ -530,6 +573,7 @@ mod tests {
             Some("0.2.0"),
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("updated to v0.2.0"), "got: {plain:?}");
@@ -546,6 +590,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         assert!(!strip_ansi(&out).contains("updated to"));
     }
@@ -561,6 +606,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(
@@ -581,6 +627,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(plain.contains("claude-sonnet-4-5"));
     }
@@ -602,6 +649,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(plain.contains("50%"));
     }
@@ -617,6 +665,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(plain.contains("(main)"));
     }
@@ -632,6 +681,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
@@ -648,6 +698,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(plain.contains("myproject"));
     }
@@ -669,6 +720,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         assert!(
             result.contains('\n'),
@@ -701,6 +753,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -735,6 +788,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
@@ -769,6 +823,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("API down"));
@@ -788,6 +843,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -830,6 +886,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
@@ -864,6 +921,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(plain.contains("10%"));
         assert!(!plain.contains("100%"));
@@ -886,7 +944,8 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable
+            Layout::Comfortable,
+            None
         ))
         .contains("50%"));
         assert!(strip_ansi(&render(
@@ -896,7 +955,8 @@ mod tests {
             0,
             None,
             RoundingMode::Ceiling,
-            Layout::Comfortable
+            Layout::Comfortable,
+            None
         ))
         .contains("51%"));
         assert!(strip_ansi(&render(
@@ -906,7 +966,8 @@ mod tests {
             0,
             None,
             RoundingMode::Nearest,
-            Layout::Comfortable
+            Layout::Comfortable,
+            None
         ))
         .contains("50%"));
     }
@@ -940,6 +1001,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"), "default model name should render");
@@ -957,6 +1019,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         ));
         assert!(plain.contains("Opus 4.7"), "short model name should render");
         assert!(
@@ -977,6 +1040,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         ));
         assert!(
             plain.contains("myproject(main)"),
@@ -1005,6 +1069,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&result);
 
@@ -1052,6 +1117,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Elevated API errors"));
@@ -1092,6 +1158,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("🔒 fable 5"), "jail bit missing: {plain}");
@@ -1119,6 +1186,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -1147,6 +1215,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -1171,6 +1240,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(!plain.contains("Elevated API errors"), "{plain}");
@@ -1193,6 +1263,7 @@ mod tests {
                 None,
                 RoundingMode::Floor,
                 layout,
+                None,
             );
             let plain = strip_ansi(&out);
             assert!(plain.contains("Elevated API errors"), "{layout:?}: {plain}");
@@ -1218,6 +1289,128 @@ mod tests {
         assert_eq!(classify_incident(&fable, now, false), IncidentSlot::Hidden);
     }
 
+    // ── Fable weekly cap ──────────────────────────────────────────────────────
+
+    const RATE_LIMITED: &str = r#"{
+        "rate_limits": {
+            "five_hour": {"used_percentage": 9.0, "resets_at": 1705316400},
+            "seven_day": {"used_percentage": 12.0, "resets_at": 1705833600}
+        }
+    }"#;
+
+    fn fable(percent: u8) -> Option<FableLimit> {
+        Some(FableLimit {
+            percent,
+            resets_at: 1_785_358_800,
+        })
+    }
+
+    #[test]
+    fn test_render_fable_row_comfortable() {
+        let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+            fable(51),
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("fable"), "fable row missing: {plain}");
+        assert!(plain.contains("51%"), "fable pct missing: {plain}");
+        // Its own row, under the weekly one.
+        let rows: Vec<&str> = plain.lines().collect();
+        let weekly = rows.iter().position(|l| l.contains("weekly")).unwrap();
+        let fable_row = rows.iter().position(|l| l.contains("fable")).unwrap();
+        assert_eq!(fable_row, weekly + 1, "fable should follow weekly: {plain}");
+    }
+
+    #[test]
+    fn test_render_fable_inline_condensed_stays_single_line() {
+        let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
+        let out = render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            fable(51),
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("fbl"), "fable label missing: {plain}");
+        assert!(plain.contains("51%"), "fable pct missing: {plain}");
+        assert!(!out.contains('\n'), "condensed must stay single-line");
+    }
+
+    #[test]
+    fn test_render_no_fable_row_when_absent() {
+        let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
+        for layout in [Layout::Comfortable, Layout::Condensed] {
+            let plain = strip_ansi(&render(
+                &input,
+                None,
+                &[],
+                0,
+                None,
+                RoundingMode::Floor,
+                layout,
+                None,
+            ));
+            assert!(!plain.contains("fable"), "{layout:?}: {plain}");
+            assert!(!plain.contains("fbl"), "{layout:?}: {plain}");
+        }
+    }
+
+    #[test]
+    fn test_render_fable_percent_bypasses_rounding_mode() {
+        // The usage endpoint hands us a whole number; the rounding mode applies
+        // to the payload's fractional percentages, not to this one.
+        let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
+        for mode in [
+            RoundingMode::Floor,
+            RoundingMode::Ceiling,
+            RoundingMode::Nearest,
+        ] {
+            let plain = strip_ansi(&render(
+                &input,
+                None,
+                &[],
+                0,
+                None,
+                mode,
+                Layout::Comfortable,
+                fable(51),
+            ));
+            assert!(plain.contains("51%"), "{mode:?}: {plain}");
+        }
+    }
+
+    #[test]
+    fn test_render_fable_hidden_on_api_billing() {
+        // No rate_limits block → API billing → no plan windows at all, so a
+        // stale fable file must not sneak a row in.
+        let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
+        for layout in [Layout::Comfortable, Layout::Condensed] {
+            let plain = strip_ansi(&render(
+                &input,
+                None,
+                &[],
+                0,
+                None,
+                RoundingMode::Floor,
+                layout,
+                fable(51),
+            ));
+            assert!(!plain.contains("fable"), "{layout:?}: {plain}");
+            assert!(!plain.contains("fbl"), "{layout:?}: {plain}");
+        }
+    }
+
     #[test]
     fn test_render_context_pct_condensed() {
         let json = r#"{
@@ -1235,6 +1428,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         ));
         assert!(plain.contains("50%"));
     }
@@ -1250,6 +1444,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"));
@@ -1274,6 +1469,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(plain.contains("5h"));
@@ -1297,6 +1493,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(plain.contains("7d"));
@@ -1315,6 +1512,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -1344,6 +1542,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
@@ -1361,6 +1560,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
@@ -1400,6 +1600,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(!plain.contains('⏱'), "stopwatch glyph should be gone");
     }
@@ -1418,6 +1619,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(
             plain.contains("$0.13"),
@@ -1438,6 +1640,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         ));
         assert!(plain.contains("$1.46"));
         assert!(plain.contains("💰"));
@@ -1455,6 +1658,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(!plain.contains('$'), "zero cost should be hidden");
         assert!(!plain.contains("💰"));
@@ -1470,6 +1674,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(!plain.contains('$'));
         assert!(!plain.contains("💰"));
@@ -1488,6 +1693,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         assert!(out.contains(fmt::GREEN));
 
@@ -1502,6 +1708,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         assert!(out.contains(fmt::YELLOW));
 
@@ -1516,6 +1723,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         assert!(out.contains(fmt::ORANGE));
 
@@ -1530,6 +1738,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         assert!(out.contains(fmt::RED));
     }
@@ -1545,6 +1754,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model should render");
@@ -1571,6 +1781,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"));
@@ -1592,6 +1803,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         );
         assert!(
             !out.contains('\n'),
@@ -1621,6 +1833,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
         ));
         assert!(
             !comfortable.contains("$3.14"),
@@ -1638,6 +1851,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
         ));
         assert!(
             !condensed.contains("$3.14"),
@@ -1664,6 +1878,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Comfortable,
+            None,
         ));
         assert!(
             out.starts_with("🤖"),
@@ -1682,6 +1897,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Comfortable,
+            None,
         ));
         assert!(
             !out.contains("🤖"),
@@ -1705,6 +1921,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Condensed,
+            None,
         ));
         assert!(
             out.starts_with("🤖"),
@@ -1731,6 +1948,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Comfortable,
+            None,
         ));
         assert!(
             plain.contains("myproject/tmp"),
@@ -1755,6 +1973,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Comfortable,
+            None,
         ));
         assert!(
             plain.contains("myproject"),

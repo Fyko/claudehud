@@ -73,6 +73,7 @@ dependencies = [
  "memmap2",
  "notify",
  "roxmltree",
+ "serde_json",
  "sha2",
  "tempfile",
  "ureq",

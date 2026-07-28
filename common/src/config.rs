@@ -8,6 +8,10 @@ use std::path::PathBuf;
 pub struct Config {
     pub autoupdate: bool,
     pub pin: Option<String>,
+    /// Opt-in: let the daemon read the Claude Code OAuth token and poll
+    /// `/api/oauth/usage` for the Fable weekly cap. Off by default — it's the
+    /// only thing in the daemon that touches your credentials.
+    pub fable: bool,
 }
 
 impl Default for Config {
@@ -15,6 +19,7 @@ impl Default for Config {
         Config {
             autoupdate: true,
             pin: None,
+            fable: false,
         }
     }
 }
@@ -66,6 +71,7 @@ pub fn parse(text: &str) -> Config {
         match k {
             "autoupdate" => cfg.autoupdate = !matches!(v, "false" | "0" | "no" | "off"),
             "pin" if !v.is_empty() => cfg.pin = Some(v.to_string()),
+            "fable" => cfg.fable = matches!(v, "true" | "1" | "yes" | "on"),
             _ => {}
         }
     }
@@ -100,6 +106,15 @@ mod tests {
         let c = parse(text);
         assert!(!c.autoupdate);
         assert_eq!(c.pin, Some("v1.0.0".to_string()));
+    }
+
+    #[test]
+    fn fable_is_opt_in() {
+        assert!(!parse("").fable);
+        assert!(parse("fable=true").fable);
+        assert!(parse("fable = on").fable);
+        assert!(!parse("fable=false").fable);
+        assert!(!parse("fable=wat").fable);
     }
 
     #[test]

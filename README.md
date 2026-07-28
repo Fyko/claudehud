@@ -154,6 +154,30 @@ Active incidents still render on their own line below row 1 in both layouts.
 
 Unknown values (`CLAUDEHUD_LAYOUT=foo`) print a warning to stderr and fall back to `comfortable`.
 
+### Fable weekly cap
+
+On Max plans, Fable 5 draws on up to 50% of your weekly allowance and gets its own window. Claude Code's statusline payload doesn't carry that window — only the five-hour and seven-day ones — so the daemon has to fetch it from `/api/oauth/usage` using the OAuth token Claude Code already stores (macOS keychain, `~/.claude/.credentials.json` elsewhere).
+
+Because that's the only part of claudehud that touches your credentials, it's off unless you ask for it:
+
+```bash
+echo 'fable=true' >> ~/.config/claudehud/config
+```
+
+The daemon then polls every 5 minutes and writes `percent` + reset time to `/tmp/clhud-fable`; the client renders it as a third row (comfortable) or a third inline bar (condensed):
+
+```
+current ●●●●●●●●●○  96% ⟳ 10:19am
+weekly  ●●●●●○○○○○  52% ⟳ jul 29, 8:59pm
+fable   ●●●●●○○○○○  51% ⟳ jul 29, 9:00pm
+```
+
+```
+Opus 4.7 │ ✍️ 4% │ claudehud(main*) │ ●●●● 5h 96% │ ●●○○ 7d 52% │ ●●○○ fbl 51%
+```
+
+The row disappears once the window it describes has reset, so a stopped daemon shows nothing rather than a stale number. Everything else degrades silently too: no token, an expired token, or a plan without a Fable window just means no row.
+
 ### Claude Code
 
 Run `claudehud install` to wire the statusLine into `~/.claude/settings.json`:

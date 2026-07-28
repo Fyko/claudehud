@@ -1,3 +1,4 @@
+pub mod fable;
 pub mod fmt;
 pub mod git;
 pub mod incidents;

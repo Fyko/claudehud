@@ -6,6 +6,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod cache;
+mod fable;
 mod poll;
 mod registrar;
 mod status;
@@ -63,6 +64,11 @@ fn main() -> ExitCode {
 
     std::thread::spawn(|| {
         update::start();
+    });
+
+    // No-ops unless `fable=true` in the config — it reads the OAuth token.
+    std::thread::spawn(|| {
+        fable::start();
     });
 
     // watcher::start runs the main event loop — blocks until channel closes
