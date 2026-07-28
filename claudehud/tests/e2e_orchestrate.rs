@@ -54,6 +54,7 @@ struct FakeEnv {
     incidents: (Vec<Incident>, u8),
     notice: Option<String>,
     fable: Option<common::fable::FableLimit>,
+    auto_compact: Option<u64>,
 }
 
 impl Env for FakeEnv {
@@ -68,6 +69,9 @@ impl Env for FakeEnv {
     }
     fn fable_limit(&self) -> Option<common::fable::FableLimit> {
         self.fable
+    }
+    fn auto_compact_window(&self) -> Option<u64> {
+        self.auto_compact
     }
 }
 
@@ -105,6 +109,7 @@ fn test_e2e_stdin_to_hud_all_segments_injected() {
         ),
         notice: Some("9.9.9".to_string()),
         fable: None,
+        auto_compact: None,
     };
 
     let out = run(
@@ -140,6 +145,7 @@ fn test_e2e_empty_stdin_yields_bare_claude() {
         incidents: (vec![], 0),
         notice: None,
         fable: None,
+        auto_compact: None,
     };
     let out = run(
         "",
@@ -159,6 +165,7 @@ fn test_e2e_condensed_layout_is_single_line() {
         incidents: (vec![], 0),
         notice: None,
         fable: None,
+        auto_compact: None,
     };
     let out = run(
         FIXTURE,

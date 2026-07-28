@@ -44,6 +44,11 @@ pub trait Env {
     /// The live **fable cap** the daemon polled, or `None` when the feature is
     /// off or the window it describes has rolled over.
     fn fable_limit(&self) -> Option<FableLimit>;
+
+    /// The session's auto-compact budget, when the user set one. Read from the
+    /// environment in the real impl; injected in tests so a percentage never
+    /// depends on the ambient shell.
+    fn auto_compact_window(&self) -> Option<u64>;
 }
 
 /// Render options resolved by `main()` from CLI args + env before orchestration.
@@ -77,6 +82,7 @@ pub fn run<E: Env>(raw: &str, env: &E, options: Options) -> String {
     let (incidents, total_active) = env.read_incidents();
     let update_notice = env.active_notice();
     let fable = env.fable_limit();
+    let auto_compact = env.auto_compact_window();
 
     render::render(
         &input,
@@ -87,6 +93,7 @@ pub fn run<E: Env>(raw: &str, env: &E, options: Options) -> String {
         options.rounding,
         options.layout,
         fable,
+        auto_compact,
     )
 }
 
@@ -110,6 +117,10 @@ impl Env for SystemEnv {
     fn fable_limit(&self) -> Option<FableLimit> {
         crate::fable::fable_limit()
     }
+
+    fn auto_compact_window(&self) -> Option<u64> {
+        crate::render::auto_compact_window()
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +134,7 @@ mod tests {
         incidents: (Vec<Incident>, u8),
         notice: Option<String>,
         fable: Option<FableLimit>,
+        auto_compact: Option<u64>,
     }
 
     impl Env for FakeEnv {
@@ -137,6 +149,9 @@ mod tests {
         }
         fn fable_limit(&self) -> Option<FableLimit> {
             self.fable
+        }
+        fn auto_compact_window(&self) -> Option<u64> {
+            self.auto_compact
         }
     }
 

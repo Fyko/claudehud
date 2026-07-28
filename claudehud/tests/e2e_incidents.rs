@@ -92,6 +92,7 @@ fn test_e2e_single_ongoing_incident() {
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
         None,
+        None,
     );
     let plain = strip_ansi(&out);
 
@@ -146,6 +147,7 @@ fn test_e2e_two_ongoing_incidents() {
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
         None,
+        None,
     );
     let plain = strip_ansi(&out);
 
@@ -189,6 +191,7 @@ fn test_e2e_overflow_shows_plus_n_more() {
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
         None,
+        None,
     );
     let plain = strip_ansi(&out);
     assert!(plain.contains("+2 more"), "got: {plain}");
@@ -214,6 +217,7 @@ fn test_e2e_no_incident_mmap_absent() {
         None,
         claudehud::render::RoundingMode::Floor,
         claudehud::render::Layout::Comfortable,
+        None,
         None,
     );
     let plain = strip_ansi(&out);

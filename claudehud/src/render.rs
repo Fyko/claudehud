@@ -70,6 +70,7 @@ pub fn render(
     rounding: RoundingMode,
     layout: Layout,
     fable: Option<FableLimit>,
+    auto_compact: Option<u64>,
 ) -> String {
     match layout {
         Layout::Comfortable => render_comfortable(
@@ -80,6 +81,7 @@ pub fn render(
             update_notice,
             rounding,
             fable,
+            auto_compact,
         ),
         Layout::Condensed => render_condensed(
             input,
@@ -89,10 +91,12 @@ pub fn render(
             update_notice,
             rounding,
             fable,
+            auto_compact,
         ),
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_comfortable(
     input: &Input,
     git: Option<(String, bool)>,
@@ -101,6 +105,7 @@ fn render_comfortable(
     update_notice: Option<&str>,
     rounding: RoundingMode,
     fable: Option<FableLimit>,
+    auto_compact: Option<u64>,
 ) -> String {
     let mut out = String::with_capacity(512);
 
@@ -112,7 +117,7 @@ fn render_comfortable(
 
     // ── Context usage ──────────────────────────────────────
     out.push_str(SEP);
-    push_context(input, rounding, &mut out);
+    push_context(input, rounding, auto_compact, &mut out);
 
     // ── Cost (skipped when absent or $0) ───────────────────
     push_cost(input, &mut out);
@@ -161,6 +166,7 @@ fn render_comfortable(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_condensed(
     input: &Input,
     git: Option<(String, bool)>,
@@ -169,6 +175,7 @@ fn render_condensed(
     update_notice: Option<&str>,
     rounding: RoundingMode,
     fable: Option<FableLimit>,
+    auto_compact: Option<u64>,
 ) -> String {
     let mut out = String::with_capacity(512);
 
@@ -180,7 +187,7 @@ fn render_condensed(
 
     // ── Context usage ──────────────────────────────────────
     out.push_str(SEP);
-    push_context(input, rounding, &mut out);
+    push_context(input, rounding, auto_compact, &mut out);
 
     // ── Cost (skipped when absent or $0) ───────────────────
     push_cost(input, &mut out);
@@ -394,9 +401,16 @@ fn push_cost(input: &Input, out: &mut String) {
     out.push_str(RESET);
 }
 
-fn push_context(input: &Input, rounding: RoundingMode, out: &mut String) {
-    let pct = context_pct(input, rounding);
-    out.push_str("✍️ ");
+fn push_context(
+    input: &Input,
+    rounding: RoundingMode,
+    auto_compact: Option<u64>,
+    out: &mut String,
+) {
+    let pct = context_pct_against(input, rounding, auto_compact);
+    out.push_str(DIM);
+    out.push_str("ctx ");
+    out.push_str(RESET);
     out.push_str(color_for_pct(pct));
     write!(out, "{pct}%").unwrap();
     out.push_str(RESET);
@@ -552,15 +566,46 @@ fn push_rate_row(
     }
 }
 
-fn context_pct(input: &Input, rounding: RoundingMode) -> u8 {
+/// Claude Code clamps its auto-compact budget to this range, so we do too —
+/// a typo'd env var shouldn't invent a window nobody is actually running.
+const AUTO_COMPACT_MIN: u64 = 100_000;
+const AUTO_COMPACT_MAX: u64 = 1_000_000;
+
+/// The auto-compact budget from the environment, if the user set one.
+///
+/// Claude Code exports `CLAUDE_CODE_AUTO_COMPACT_WINDOW` into its own process
+/// environment, and the statusline runs as a child, so it arrives for free —
+/// no reading of `~/.claude.json`.
+pub fn auto_compact_window() -> Option<u64> {
+    std::env::var("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|n| n.clamp(AUTO_COMPACT_MIN, AUTO_COMPACT_MAX))
+}
+
+/// Percent of the context window in use.
+///
+/// The window that matters is the one you'll actually hit: with auto-compact
+/// set below the model's window, the conversation compacts at that budget, so
+/// a percentage of the full window understates how close you are. When the
+/// budget binds we recompute from raw token counts rather than trusting the
+/// payload's `used_percentage`, which is measured against the full window.
+fn context_pct_against(input: &Input, rounding: RoundingMode, auto_compact: Option<u64>) -> u8 {
     let cw = input.context_window.as_ref();
-    if let Some(pct) = cw.and_then(|cw| cw.used_percentage) {
-        return rounding.apply(pct);
-    }
     let size = cw
         .and_then(|cw| cw.context_window_size)
         .filter(|&s| s > 0)
         .unwrap_or(200_000);
+    let effective = auto_compact.map_or(size, |budget| budget.min(size));
+
+    if effective == size {
+        if let Some(pct) = cw.and_then(|cw| cw.used_percentage) {
+            return rounding.apply(pct);
+        }
+    }
+
     let current = cw
         .and_then(|cw| cw.current_usage.as_ref())
         .map(|u| {
@@ -569,7 +614,14 @@ fn context_pct(input: &Input, rounding: RoundingMode) -> u8 {
                 + u.cache_read_input_tokens.unwrap_or(0)
         })
         .unwrap_or(0);
-    rounding.apply((current as f64 * 100.0) / size as f64)
+    // With no token counts to work from, fall back to the payload's own figure
+    // rather than claiming 0%.
+    if current == 0 {
+        if let Some(pct) = cw.and_then(|cw| cw.used_percentage) {
+            return rounding.apply(pct);
+        }
+    }
+    rounding.apply((current as f64 * 100.0) / effective as f64)
 }
 
 #[cfg(test)]
@@ -628,6 +680,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("updated to v0.2.0"), "got: {plain:?}");
@@ -645,6 +698,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         assert!(!strip_ansi(&out).contains("updated to"));
     }
@@ -660,6 +714,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         );
         let plain = strip_ansi(&result);
@@ -681,6 +736,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(plain.contains("claude-sonnet-4-5"));
@@ -704,6 +760,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(plain.contains("50%"));
     }
@@ -719,6 +776,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(plain.contains("(main)"));
@@ -736,6 +794,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
@@ -752,6 +811,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(plain.contains("myproject"));
@@ -774,6 +834,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         );
         assert!(
@@ -807,6 +868,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         );
         let plain = strip_ansi(&out);
@@ -843,6 +905,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
@@ -878,6 +941,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("API down"));
@@ -897,6 +961,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         );
         let plain = strip_ansi(&out);
@@ -941,6 +1006,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
@@ -976,6 +1042,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(plain.contains("10%"));
         assert!(!plain.contains("100%"));
@@ -999,6 +1066,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None
         ))
         .contains("50%"));
@@ -1010,6 +1078,7 @@ mod tests {
             None,
             RoundingMode::Ceiling,
             Layout::Comfortable,
+            None,
             None
         ))
         .contains("51%"));
@@ -1021,6 +1090,7 @@ mod tests {
             None,
             RoundingMode::Nearest,
             Layout::Comfortable,
+            None,
             None
         ))
         .contains("50%"));
@@ -1056,6 +1126,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"), "default model name should render");
@@ -1073,6 +1144,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         ));
         assert!(plain.contains("Opus 4.7"), "short model name should render");
@@ -1094,6 +1166,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         ));
         assert!(
@@ -1123,6 +1196,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         );
         let plain = strip_ansi(&result);
@@ -1169,6 +1243,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Elevated API errors"));
@@ -1207,6 +1282,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(
@@ -1232,6 +1308,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(!plain.contains("Elevated API errors"), "{plain}");
@@ -1254,6 +1331,7 @@ mod tests {
                 None,
                 RoundingMode::Floor,
                 layout,
+                None,
                 None,
             );
             let plain = strip_ansi(&out);
@@ -1300,6 +1378,7 @@ mod tests {
                 RoundingMode::Floor,
                 layout,
                 None,
+                None,
             ));
             let model_end = if layout == Layout::Comfortable {
                 "Opus 5 (1M context) xhigh"
@@ -1326,6 +1405,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(plain.contains("Haiku 4.5"), "{plain}");
         for level in ["low", "medium", "high", "xhigh", "max"] {
@@ -1346,6 +1426,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         // Straight into the separator — no stray space where a level would go.
         assert!(plain.starts_with("Opus 5 │"), "{plain}");
@@ -1364,6 +1445,7 @@ mod tests {
                 None,
                 RoundingMode::Floor,
                 layout,
+                None,
                 None,
             ));
             assert!(plain.starts_with("⚡ Opus 5 high"), "{layout:?}: {plain}");
@@ -1386,6 +1468,7 @@ mod tests {
                 RoundingMode::Floor,
                 Layout::Comfortable,
                 None,
+                None,
             ));
             assert!(!plain.contains('⚡'), "{plain}");
         }
@@ -1406,6 +1489,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(plain.starts_with("🤖"), "{plain}");
         assert!(plain.contains("⚡ Opus 5"), "{plain}");
@@ -1425,6 +1509,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         ));
         assert!(condensed.starts_with("Opus 5 (1M) │"), "{condensed}");
 
@@ -1437,6 +1522,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(
@@ -1461,6 +1547,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         ));
         assert!(!plain.contains("1M"), "{plain}");
     }
@@ -1480,6 +1567,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         ));
         assert!(plain.starts_with("Opus 5 (1M) │"), "{plain}");
@@ -1502,10 +1590,134 @@ mod tests {
                 RoundingMode::Floor,
                 layout,
                 None,
+                None,
             ));
             assert!(plain.contains("Fresh thing"), "{layout:?}: {plain}");
             assert!(!plain.contains("Old thing"), "{layout:?}: {plain}");
             assert!(plain.contains("+2 ongoing (24h+)"), "{layout:?}: {plain}");
+        }
+    }
+
+    // ── Context window vs the auto-compact budget ─────────────────────────────
+
+    /// 32,169 tokens of a 1M window — 3% of the model's window, 8% of a 400k
+    /// auto-compact budget.
+    const BIG_WINDOW: &str = r#"{
+        "context_window": {
+            "context_window_size": 1000000,
+            "used_percentage": 3,
+            "current_usage": {
+                "input_tokens": 6,
+                "cache_creation_input_tokens": 15288,
+                "cache_read_input_tokens": 16875
+            }
+        }
+    }"#;
+
+    #[test]
+    fn test_context_pct_uses_the_payload_figure_without_a_budget() {
+        let input: Input = serde_json::from_str(BIG_WINDOW).unwrap();
+        assert_eq!(context_pct_against(&input, RoundingMode::Floor, None), 3);
+    }
+
+    #[test]
+    fn test_context_pct_measures_against_a_binding_auto_compact_budget() {
+        let input: Input = serde_json::from_str(BIG_WINDOW).unwrap();
+        // 32169 / 400000 = 8.04%
+        assert_eq!(
+            context_pct_against(&input, RoundingMode::Floor, Some(400_000)),
+            8
+        );
+        assert_eq!(
+            context_pct_against(&input, RoundingMode::Ceiling, Some(400_000)),
+            9
+        );
+    }
+
+    #[test]
+    fn test_context_pct_ignores_a_budget_bigger_than_the_window() {
+        // A 400k budget on a 200k model never binds — the model runs out first.
+        let json = r#"{
+            "context_window": {
+                "context_window_size": 200000,
+                "used_percentage": 25,
+                "current_usage": {"input_tokens": 50000}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            context_pct_against(&input, RoundingMode::Floor, Some(400_000)),
+            25
+        );
+    }
+
+    #[test]
+    fn test_context_pct_falls_back_to_the_payload_when_tokens_are_missing() {
+        // A budget is set but the payload carries no token counts — reporting
+        // 0% would be a lie.
+        let json = r#"{
+            "context_window": {"context_window_size": 1000000, "used_percentage": 3}
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            context_pct_against(&input, RoundingMode::Floor, Some(400_000)),
+            3
+        );
+    }
+
+    #[test]
+    fn test_context_pct_clamps_at_a_full_budget() {
+        let json = r#"{
+            "context_window": {
+                "context_window_size": 1000000,
+                "current_usage": {"input_tokens": 900000}
+            }
+        }"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            context_pct_against(&input, RoundingMode::Floor, Some(400_000)),
+            100
+        );
+    }
+
+    #[test]
+    fn test_auto_compact_window_parses_and_clamps_like_claude_code() {
+        // Claude Code's own bounds: 100k floor, 1M ceiling.
+        let cases = [
+            ("400000", Some(400_000)),
+            (" 250000 ", Some(250_000)),
+            ("50", Some(AUTO_COMPACT_MIN)),
+            ("99999999", Some(AUTO_COMPACT_MAX)),
+            ("nonsense", None),
+            ("", None),
+        ];
+        for (raw, want) in cases {
+            let got = raw
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .map(|n| n.clamp(AUTO_COMPACT_MIN, AUTO_COMPACT_MAX));
+            assert_eq!(got, want, "input {raw:?}");
+        }
+    }
+
+    #[test]
+    fn test_context_segment_is_labelled_not_emoji() {
+        let input: Input = serde_json::from_str(BIG_WINDOW).unwrap();
+        for layout in [Layout::Comfortable, Layout::Condensed] {
+            let plain = strip_ansi(&render(
+                &input,
+                None,
+                &[],
+                0,
+                None,
+                RoundingMode::Floor,
+                layout,
+                None,
+                None,
+            ));
+            assert!(plain.contains("ctx 3%"), "{layout:?}: {plain}");
+            assert!(!plain.contains('✍'), "{layout:?}: {plain}");
         }
     }
 
@@ -1649,6 +1861,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             fable(51),
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("fable"), "fable row missing: {plain}");
@@ -1673,6 +1886,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             fable(95),
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("fbl"), "fable label missing: {plain}");
@@ -1692,6 +1906,7 @@ mod tests {
                 None,
                 RoundingMode::Floor,
                 layout,
+                None,
                 None,
             ));
             assert!(!plain.contains("fable"), "{layout:?}: {plain}");
@@ -1718,6 +1933,7 @@ mod tests {
                 mode,
                 Layout::Comfortable,
                 fable(51),
+                None,
             ));
             assert!(plain.contains("51%"), "{mode:?}: {plain}");
         }
@@ -1738,6 +1954,7 @@ mod tests {
                 RoundingMode::Floor,
                 layout,
                 fable(51),
+                None,
             ));
             assert!(!plain.contains("fable"), "{layout:?}: {plain}");
             assert!(!plain.contains("fbl"), "{layout:?}: {plain}");
@@ -1762,6 +1979,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         ));
         assert!(plain.contains("50%"));
     }
@@ -1777,6 +1995,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         );
         let plain = strip_ansi(&result);
@@ -1803,6 +2022,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(plain.contains("5h"));
@@ -1827,6 +2047,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         );
         let plain = strip_ansi(&result);
         assert!(plain.contains("7d"));
@@ -1845,6 +2066,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         );
         let plain = strip_ansi(&out);
@@ -1876,6 +2098,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("+2 more"));
@@ -1893,6 +2116,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         );
         let plain = strip_ansi(&out);
@@ -1934,6 +2158,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(!plain.contains('⏱'), "stopwatch glyph should be gone");
     }
@@ -1952,6 +2177,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(
@@ -1974,6 +2200,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         ));
         assert!(plain.contains("$1.46"));
         assert!(plain.contains("💰"));
@@ -1992,6 +2219,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(!plain.contains('$'), "zero cost should be hidden");
         assert!(!plain.contains("💰"));
@@ -2007,6 +2235,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(!plain.contains('$'));
@@ -2027,6 +2256,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         assert!(out.contains(fmt::GREEN));
 
@@ -2041,6 +2271,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         );
         assert!(out.contains(fmt::YELLOW));
@@ -2057,6 +2288,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         );
         assert!(out.contains(fmt::ORANGE));
 
@@ -2071,6 +2303,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         );
         assert!(out.contains(fmt::RED));
@@ -2087,6 +2320,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Comfortable,
+            None,
             None,
         );
         let plain = strip_ansi(&out);
@@ -2115,6 +2349,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Condensed,
             None,
+            None,
         );
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"));
@@ -2136,6 +2371,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         );
         assert!(
@@ -2167,6 +2403,7 @@ mod tests {
             RoundingMode::Floor,
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(
             !comfortable.contains("$3.14"),
@@ -2184,6 +2421,7 @@ mod tests {
             None,
             RoundingMode::Floor,
             Layout::Condensed,
+            None,
             None,
         ));
         assert!(
@@ -2212,6 +2450,7 @@ mod tests {
             RoundingMode::default(),
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(
             out.starts_with("🤖"),
@@ -2230,6 +2469,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(
@@ -2254,6 +2494,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Condensed,
+            None,
             None,
         ));
         assert!(
@@ -2282,6 +2523,7 @@ mod tests {
             RoundingMode::default(),
             Layout::Comfortable,
             None,
+            None,
         ));
         assert!(
             plain.contains("myproject/tmp"),
@@ -2306,6 +2548,7 @@ mod tests {
             None,
             RoundingMode::default(),
             Layout::Comfortable,
+            None,
             None,
         ));
         assert!(
