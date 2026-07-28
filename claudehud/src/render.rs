@@ -250,9 +250,11 @@ fn push_model_short(input: &Input, out: &mut String) {
         .split_once(" (")
         .map(|(prefix, _)| prefix)
         .unwrap_or(raw);
+    push_fast_glyph(input, out);
     out.push_str(BLUE);
     out.push_str(short);
     out.push_str(RESET);
+    push_effort(input, out);
 }
 
 fn push_model_full(input: &Input, out: &mut String) {
@@ -261,8 +263,32 @@ fn push_model_full(input: &Input, out: &mut String) {
         .as_ref()
         .and_then(|m| m.display_name.as_deref())
         .unwrap_or("Claude");
+    push_fast_glyph(input, out);
     out.push_str(BLUE);
     out.push_str(model);
+    out.push_str(RESET);
+    push_effort(input, out);
+}
+
+/// Fast mode marks the model itself, so it rides in front of the name.
+fn push_fast_glyph(input: &Input, out: &mut String) {
+    if input.fast_mode == Some(true) {
+        out.push_str("⚡ ");
+    }
+}
+
+/// The live reasoning effort, dimmed after the model name. Absent for models
+/// that don't take an effort parameter — nothing renders then, not a default.
+fn push_effort(input: &Input, out: &mut String) {
+    let Some(level) = input.effort.as_ref().and_then(|e| e.level.as_deref()) else {
+        return;
+    };
+    if level.is_empty() {
+        return;
+    }
+    out.push(' ');
+    out.push_str(DIM);
+    out.push_str(level);
     out.push_str(RESET);
 }
 
@@ -1183,6 +1209,133 @@ mod tests {
             IncidentSlot::LongRunning
         );
         assert_eq!(classify_incident(&stale, now, false), IncidentSlot::Hidden);
+    }
+
+    // ── Fast mode + effort ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_effort_after_model_name_both_layouts() {
+        let json =
+            r#"{"model": {"display_name": "Opus 5 (1M context)"}, "effort": {"level": "xhigh"}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        for layout in [Layout::Comfortable, Layout::Condensed] {
+            let plain = strip_ansi(&render(
+                &input,
+                None,
+                &[],
+                0,
+                None,
+                RoundingMode::Floor,
+                layout,
+                None,
+            ));
+            let model_end = if layout == Layout::Comfortable {
+                "Opus 5 (1M context) xhigh"
+            } else {
+                "Opus 5 xhigh"
+            };
+            assert!(plain.contains(model_end), "{layout:?}: {plain}");
+        }
+    }
+
+    #[test]
+    fn test_render_no_effort_when_model_lacks_the_parameter() {
+        // `effort` is absent for models that don't take one — render nothing
+        // rather than inventing a default level.
+        let json = r#"{"model": {"display_name": "Haiku 4.5"}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+            None,
+        ));
+        assert!(plain.contains("Haiku 4.5"), "{plain}");
+        for level in ["low", "medium", "high", "xhigh", "max"] {
+            assert!(!plain.contains(level), "leaked {level}: {plain}");
+        }
+    }
+
+    #[test]
+    fn test_render_empty_effort_level_renders_nothing() {
+        let json = r#"{"model": {"display_name": "Opus 5"}, "effort": {"level": ""}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+            None,
+        ));
+        // Straight into the separator — no stray space where a level would go.
+        assert!(plain.starts_with("Opus 5 │"), "{plain}");
+    }
+
+    #[test]
+    fn test_render_fast_mode_glyph_precedes_model() {
+        let json = r#"{"model": {"display_name": "Opus 5"}, "fast_mode": true, "effort": {"level": "high"}}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        for layout in [Layout::Comfortable, Layout::Condensed] {
+            let plain = strip_ansi(&render(
+                &input,
+                None,
+                &[],
+                0,
+                None,
+                RoundingMode::Floor,
+                layout,
+                None,
+            ));
+            assert!(plain.starts_with("⚡ Opus 5 high"), "{layout:?}: {plain}");
+        }
+    }
+
+    #[test]
+    fn test_render_no_glyph_when_fast_mode_off_or_absent() {
+        for json in [
+            r#"{"model": {"display_name": "Opus 5"}, "fast_mode": false}"#,
+            r#"{"model": {"display_name": "Opus 5"}}"#,
+        ] {
+            let input: Input = serde_json::from_str(json).unwrap();
+            let plain = strip_ansi(&render(
+                &input,
+                None,
+                &[],
+                0,
+                None,
+                RoundingMode::Floor,
+                Layout::Comfortable,
+                None,
+            ));
+            assert!(!plain.contains('⚡'), "{plain}");
+        }
+    }
+
+    #[test]
+    fn test_render_fast_glyph_follows_the_agent_badge() {
+        // The badge stays leftmost; the glyph belongs to the model segment.
+        let json =
+            r#"{"agent_type": "claude", "model": {"display_name": "Opus 5"}, "fast_mode": true}"#;
+        let input: Input = serde_json::from_str(json).unwrap();
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Comfortable,
+            None,
+        ));
+        assert!(plain.starts_with("🤖"), "{plain}");
+        assert!(plain.contains("⚡ Opus 5"), "{plain}");
     }
 
     // ── Fable weekly cap ──────────────────────────────────────────────────────
