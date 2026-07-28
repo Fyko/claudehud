@@ -453,9 +453,7 @@ fn push_rate_inline(
 ) {
     fmt::build_bar(pct, 4, out);
     out.push(' ');
-    out.push_str(WHITE);
     out.push_str(label);
-    out.push_str(RESET);
     out.push(' ');
     out.push_str(color_for_pct(pct));
     write!(out, "{pct}%").unwrap();
@@ -465,9 +463,7 @@ fn push_rate_inline(
         out.push_str(DIM);
         out.push_str("⟳ ");
         out.push_str(RESET);
-        out.push_str(WHITE);
         out.push_str(&format_reset_time(epoch, style));
-        out.push_str(RESET);
     }
 }
 
@@ -478,9 +474,7 @@ fn push_rate_row(
     style: ResetStyle,
     out: &mut String,
 ) {
-    out.push_str(WHITE);
     out.push_str(label);
-    out.push_str(RESET);
     out.push(' ');
     fmt::build_bar(pct, 10, out);
     out.push(' ');
@@ -492,9 +486,7 @@ fn push_rate_row(
         out.push_str(DIM);
         out.push_str(" ⟳ ");
         out.push_str(RESET);
-        out.push_str(WHITE);
         out.push_str(&format_reset_time(epoch, style));
-        out.push_str(RESET);
     }
 }
 

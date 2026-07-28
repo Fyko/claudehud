@@ -1,10 +1,18 @@
-pub const BLUE: &str = "\x1b[38;2;0;153;255m";
-pub const ORANGE: &str = "\x1b[38;2;255;176;85m";
-pub const GREEN: &str = "\x1b[38;2;0;175;80m";
-pub const CYAN: &str = "\x1b[38;2;86;182;194m";
-pub const RED: &str = "\x1b[38;2;255;85;85m";
-pub const YELLOW: &str = "\x1b[38;2;230;200;0m";
-pub const WHITE: &str = "\x1b[38;2;220;220;220m";
+//! Colors come from the terminal's own 16-color palette rather than fixed RGB,
+//! so the HUD inherits whatever theme the user runs — light or dark. Hardcoded
+//! truecolor looked sharp on one background and vanished on the other (a near
+//! white label on a near-white terminal).
+//!
+//! The one exception is [`ORANGE`]: ANSI has no orange slot, and the severity
+//! ladder needs a step between yellow and red. 256-color 208 is legible on both
+//! light and dark backgrounds.
+
+pub const BLUE: &str = "\x1b[34m";
+pub const ORANGE: &str = "\x1b[38;5;208m";
+pub const GREEN: &str = "\x1b[32m";
+pub const CYAN: &str = "\x1b[36m";
+pub const RED: &str = "\x1b[31m";
+pub const YELLOW: &str = "\x1b[33m";
 pub const DIM: &str = "\x1b[2m";
 pub const RESET: &str = "\x1b[0m";
 pub const SEP: &str = " \x1b[2m│\x1b[0m ";
