@@ -158,7 +158,7 @@ mod tests {
     fn opts() -> Options {
         Options {
             rounding: RoundingMode::Floor,
-            layout: Layout::Comfortable,
+            layout: Layout::Condensed,
         }
     }
 

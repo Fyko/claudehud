@@ -7,7 +7,7 @@ use common::incidents::Incident;
 
 use crate::fmt::{self, color_for_pct, BLUE, CYAN, DIM, GREEN, RED, RESET, SEP};
 use crate::input::Input;
-use crate::time::{format_countdown, format_duration, format_reset_time, ResetStyle};
+use crate::time::{format_countdown, format_duration};
 
 /// Incidents at or beyond this age are treated as "long-running": filtered out of
 /// the normal list (collapsed to a breadcrumb in comfortable, hidden in condensed).
@@ -44,14 +44,12 @@ impl RoundingMode {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Layout {
     #[default]
-    Comfortable,
     Condensed,
 }
 
 impl Layout {
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
-            "comfortable" => Some(Self::Comfortable),
             "condensed" => Some(Self::Condensed),
             _ => None,
         }
@@ -75,16 +73,6 @@ pub fn render(
     auto_compact: Option<u64>,
 ) -> String {
     match layout {
-        Layout::Comfortable => render_comfortable(
-            input,
-            git.as_ref(),
-            incidents,
-            total_active,
-            update_notice,
-            rounding,
-            fable,
-            auto_compact,
-        ),
         Layout::Condensed => render_condensed(
             input,
             git.as_ref(),
@@ -96,76 +84,6 @@ pub fn render(
             auto_compact,
         ),
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_comfortable(
-    input: &Input,
-    git: Option<&(String, bool)>,
-    incidents: &[Incident],
-    total_active: u8,
-    update_notice: Option<&str>,
-    rounding: RoundingMode,
-    fable: Option<FableLimit>,
-    auto_compact: Option<u64>,
-) -> String {
-    let mut out = String::with_capacity(512);
-
-    // ── Agent badge (background agents only) ───────────────
-    push_agent_badge(input, &mut out);
-
-    // ── Model ──────────────────────────────────────────────
-    push_model_full(input, &mut out);
-
-    // ── Context usage ──────────────────────────────────────
-    out.push_str(SEP);
-    push_context(input, rounding, auto_compact, &mut out);
-
-    // ── Cost (skipped when absent or $0) ───────────────────
-    push_cost(input, &mut out);
-
-    // ── Dir + git ──────────────────────────────────────────
-    out.push_str(SEP);
-    push_dir_branch(input, git, false, &mut out);
-
-    // ── Incident lines (between line 1 and rate limits) ────
-    push_incidents(incidents, total_active, &mut out);
-    push_update_notice(update_notice, &mut out);
-
-    // ── Rate limits ────────────────────────────────────────
-    if let Some(rl) = &input.rate_limits {
-        if let Some(fh) = &rl.five_hour {
-            if let Some(pct_f) = fh.used_percentage {
-                let pct = rounding.apply(pct_f);
-                out.push_str("\n\n");
-                push_rate_row("current", pct, fh.resets_at, ResetStyle::Time, &mut out);
-
-                if let Some(sd) = &rl.seven_day {
-                    if let Some(pct_f) = sd.used_percentage {
-                        let pct = rounding.apply(pct_f);
-                        out.push('\n');
-                        push_rate_row("weekly ", pct, sd.resets_at, ResetStyle::DateTime, &mut out);
-                    }
-                }
-
-                // ponytail: nested under five_hour with the other rows — the
-                // fable cap is a plan-billing number, and plan billing always
-                // brings a five-hour window with it.
-                if let Some(f) = fable {
-                    out.push('\n');
-                    push_rate_row(
-                        "fable  ",
-                        f.percent,
-                        Some(f.resets_at),
-                        ResetStyle::DateTime,
-                        &mut out,
-                    );
-                }
-            }
-        }
-    }
-
-    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -345,19 +263,6 @@ fn is_extended_context(input: &Input) -> bool {
             .as_ref()
             .and_then(|cw| cw.context_window_size)
             .is_some_and(|size| size >= 1_000_000)
-}
-
-fn push_model_full(input: &Input, out: &mut String) {
-    let model = input
-        .model
-        .as_ref()
-        .and_then(|m| m.display_name.as_deref())
-        .unwrap_or("Claude");
-    push_fast_glyph(input, out);
-    out.push_str(BLUE);
-    out.push_str(model);
-    out.push_str(RESET);
-    push_effort(input, out);
 }
 
 /// Fast mode marks the model itself, so it rides in front of the name.
@@ -545,29 +450,6 @@ fn push_rate_rotating(w: RateWindow, now: u64, out: &mut String) {
     }
 }
 
-fn push_rate_row(
-    label: &str,
-    pct: u8,
-    resets_at: Option<u64>,
-    style: ResetStyle,
-    out: &mut String,
-) {
-    out.push_str(label);
-    out.push(' ');
-    fmt::build_bar(pct, 10, out);
-    out.push(' ');
-    out.push_str(color_for_pct(pct));
-    write!(out, "{pct:2}%").unwrap();
-    out.push_str(RESET);
-    if let Some(epoch) = resets_at.filter(|&e| e > 0) {
-        out.push(' ');
-        out.push_str(DIM);
-        out.push_str(" ⟳ ");
-        out.push_str(RESET);
-        out.push_str(&format_reset_time(epoch, style));
-    }
-}
-
 /// Claude Code clamps its auto-compact budget to this range, so we do too —
 /// a typo'd env var shouldn't invent a window nobody is actually running.
 const AUTO_COMPACT_MIN: u64 = 100_000;
@@ -680,7 +562,7 @@ mod tests {
             0,
             Some("0.2.0"),
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
@@ -698,73 +580,11 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
         assert!(!strip_ansi(&out).contains("updated to"));
-    }
-
-    #[test]
-    fn test_render_default_model() {
-        let input = Input::default();
-        let result = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        );
-        let plain = strip_ansi(&result);
-        assert!(
-            plain.contains("Claude"),
-            "should contain default model name"
-        );
-    }
-
-    #[test]
-    fn test_render_model_name() {
-        let json = r#"{"model": {"display_name": "claude-sonnet-4-5"}}"#;
-        let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        ));
-        assert!(plain.contains("claude-sonnet-4-5"));
-    }
-
-    #[test]
-    fn test_render_context_pct() {
-        let json = r#"{
-            "context_window": {
-                "context_window_size": 200000,
-                "current_usage": {"input_tokens": 100000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
-            }
-        }"#;
-        let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        ));
-        assert!(plain.contains("50%"));
     }
 
     #[test]
@@ -777,28 +597,11 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
         assert!(plain.contains("(main)"));
-    }
-
-    #[test]
-    fn test_render_git_dirty() {
-        let input = Input::default();
-        let plain = strip_ansi(&render(
-            &input,
-            Some(("main".to_string(), true)),
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        ));
-        assert!(plain.contains("(main*") || plain.contains("main") && plain.contains('*'));
     }
 
     #[test]
@@ -812,105 +615,11 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
         assert!(plain.contains("myproject"));
-    }
-
-    #[test]
-    fn test_render_rate_limits_present() {
-        let json = r#"{
-            "rate_limits": {
-                "five_hour": {"used_percentage": 45.0, "resets_at": 1705316400},
-                "seven_day": {"used_percentage": 12.0, "resets_at": 1705833600}
-            }
-        }"#;
-        let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        );
-        assert!(
-            result.contains('\n'),
-            "should have newlines for rate limits"
-        );
-        let plain = strip_ansi(&result);
-        assert!(plain.contains("current"));
-        assert!(plain.contains("weekly"));
-    }
-
-    #[test]
-    fn test_render_incident_present_major() {
-        use common::incidents::{Incident, Severity};
-        let incident = Incident {
-            severity: Severity::Major,
-            started_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                .saturating_sub(12 * 60),
-            title: "Elevated API errors".to_string(),
-            url: "https://status.claude.com/incidents/abc".to_string(),
-        };
-        let input = Input::default();
-        let out = render(
-            &input,
-            None,
-            &[incident],
-            1,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        );
-        let plain = strip_ansi(&out);
-        assert!(
-            out.contains(fmt::ORANGE),
-            "title should be orange for major severity"
-        );
-        assert!(plain.contains("Elevated API errors"));
-        assert!(plain.contains("started 12m ago"));
-        assert!(out.contains("\x1b]8;;https://status.claude.com/incidents/abc"));
-        assert!(!plain.contains("more"));
-    }
-
-    #[test]
-    fn test_render_incident_with_plus_n_more() {
-        use common::incidents::{Incident, Severity};
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let incident = Incident {
-            severity: Severity::Minor,
-            started_at: now,
-            title: "Thing A".to_string(),
-            url: "https://status.claude.com/incidents/a".to_string(),
-        };
-        // 1 stored, total=3 → "+2 more"
-        let out = render(
-            &Input::default(),
-            None,
-            &[incident],
-            3,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        );
-        let plain = strip_ansi(&out);
-        assert!(plain.contains("+2 more"));
     }
 
     #[test]
@@ -941,7 +650,7 @@ mod tests {
             2,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
@@ -962,7 +671,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
@@ -997,34 +706,6 @@ mod tests {
     }
 
     #[test]
-    fn test_render_real_stdin_fixture() {
-        let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        );
-        let plain = strip_ansi(&out);
-        assert!(plain.contains("Opus 4.7"), "model name should render");
-        assert!(
-            plain.contains("22%"),
-            "server-provided used_percentage wins"
-        );
-        assert!(plain.contains("project"), "cwd dirname should render");
-        assert!(
-            plain.contains("current"),
-            "five-hour rate row should render"
-        );
-        assert!(plain.contains("weekly"), "seven-day rate row should render");
-    }
-
-    #[test]
     fn test_render_prefers_server_used_percentage() {
         // current_usage would sum to well over 100%, but used_percentage says 10.
         let json = r#"{
@@ -1042,7 +723,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -1067,7 +748,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None
         ))
@@ -1079,7 +760,7 @@ mod tests {
             0,
             None,
             RoundingMode::Ceiling,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None
         ))
@@ -1091,7 +772,7 @@ mod tests {
             0,
             None,
             RoundingMode::Nearest,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None
         ))
@@ -1100,18 +781,12 @@ mod tests {
 
     #[test]
     fn test_layout_parse() {
-        assert_eq!(Layout::parse("comfortable"), Some(Layout::Comfortable));
-        assert_eq!(Layout::parse("COMFORTABLE"), Some(Layout::Comfortable));
         assert_eq!(Layout::parse("condensed"), Some(Layout::Condensed));
+        assert_eq!(Layout::parse("comfortable"), None);
         assert_eq!(Layout::parse("Condensed"), Some(Layout::Condensed));
         assert_eq!(Layout::parse(""), None);
         assert_eq!(Layout::parse("compact"), None);
         assert_eq!(Layout::parse("garbage"), None);
-    }
-
-    #[test]
-    fn test_layout_default_is_comfortable() {
-        assert_eq!(Layout::default(), Layout::Comfortable);
     }
 
     // ── Condensed layout tests ────────────────────────────────────────────────
@@ -1272,32 +947,6 @@ mod tests {
     }
 
     #[test]
-    fn test_long_running_breadcrumb_comfortable() {
-        // ≥24h incident → collapsed to breadcrumb, line itself hidden.
-        let inc = incident_aged("Elevated API errors", 30 * 3600);
-        let out = render(
-            &Input::default(),
-            None,
-            &[inc],
-            1,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        );
-        let plain = strip_ansi(&out);
-        assert!(
-            !plain.contains("Elevated API errors"),
-            "stale line should be hidden: {plain}"
-        );
-        assert!(
-            plain.contains("+1 ongoing (24h+)"),
-            "breadcrumb missing: {plain}"
-        );
-    }
-
-    #[test]
     fn test_long_running_breadcrumb_condensed() {
         // ≥24h in condensed → line hidden, but the count still surfaces.
         let inc = incident_aged("Elevated API errors", 30 * 3600);
@@ -1323,7 +972,7 @@ mod tests {
     #[test]
     fn test_fresh_incident_still_normal_both_layouts() {
         // <24h renders as a normal line in either layout.
-        for layout in [Layout::Comfortable, Layout::Condensed] {
+        for layout in [Layout::Condensed, Layout::Condensed] {
             let inc = incident_aged("Elevated API errors", 12 * 60);
             let out = render(
                 &Input::default(),
@@ -1366,30 +1015,23 @@ mod tests {
     // ── Fast mode + effort ────────────────────────────────────────────────────
 
     #[test]
-    fn test_render_effort_after_model_name_both_layouts() {
+    fn test_render_effort_follows_the_model_name() {
         let json =
             r#"{"model": {"display_name": "Opus 5 (1M context)"}, "effort": {"level": "xhigh"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        for layout in [Layout::Comfortable, Layout::Condensed] {
-            let plain = strip_ansi(&render(
-                &input,
-                None,
-                &[],
-                0,
-                None,
-                RoundingMode::Floor,
-                layout,
-                None,
-                None,
-            ));
-            let model_end = if layout == Layout::Comfortable {
-                "Opus 5 (1M context) xhigh"
-            } else {
-                // Condensed drops the parenthetical but keeps the 1M marker.
-                "Opus 5 (1M) xhigh"
-            };
-            assert!(plain.contains(model_end), "{layout:?}: {plain}");
-        }
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            Layout::Condensed,
+            None,
+            None,
+        ));
+        // The parenthetical collapses to the 1M marker; effort follows it.
+        assert!(plain.contains("Opus 5 (1M) xhigh"), "{plain}");
     }
 
     #[test]
@@ -1405,7 +1047,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -1426,7 +1068,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -1438,7 +1080,7 @@ mod tests {
     fn test_render_fast_mode_glyph_precedes_model() {
         let json = r#"{"model": {"display_name": "Opus 5"}, "fast_mode": true, "effort": {"level": "high"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        for layout in [Layout::Comfortable, Layout::Condensed] {
+        for layout in [Layout::Condensed, Layout::Condensed] {
             let plain = strip_ansi(&render(
                 &input,
                 None,
@@ -1468,7 +1110,7 @@ mod tests {
                 0,
                 None,
                 RoundingMode::Floor,
-                Layout::Comfortable,
+                Layout::Condensed,
                 None,
                 None,
             ));
@@ -1489,7 +1131,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -1498,7 +1140,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_1m_marker_condensed_only() {
+    fn test_render_1m_marker_replaces_the_parenthetical() {
         let json = r#"{"model": {"display_name": "Opus 5 (1M context)"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
 
@@ -1514,23 +1156,6 @@ mod tests {
             None,
         ));
         assert!(condensed.starts_with("Opus 5 (1M) │"), "{condensed}");
-
-        // Comfortable keeps the harness's own wording — no double marker.
-        let comfortable = strip_ansi(&render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        ));
-        assert!(
-            comfortable.starts_with("Opus 5 (1M context) │"),
-            "{comfortable}"
-        );
     }
 
     #[test]
@@ -1582,7 +1207,7 @@ mod tests {
             incident_aged("Older thing", 50 * 3600),
             incident_aged("Fresh thing", 5 * 60),
         ];
-        for layout in [Layout::Comfortable, Layout::Condensed] {
+        for layout in [Layout::Condensed, Layout::Condensed] {
             let plain = strip_ansi(&render(
                 &Input::default(),
                 None,
@@ -1706,7 +1331,7 @@ mod tests {
     #[test]
     fn test_context_segment_is_labelled_not_emoji() {
         let input: Input = serde_json::from_str(BIG_WINDOW).unwrap();
-        for layout in [Layout::Comfortable, Layout::Condensed] {
+        for layout in [Layout::Condensed, Layout::Condensed] {
             let plain = strip_ansi(&render(
                 &input,
                 None,
@@ -1853,30 +1478,6 @@ mod tests {
     }
 
     #[test]
-    fn test_render_fable_row_comfortable() {
-        let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            fable(51),
-            None,
-        );
-        let plain = strip_ansi(&out);
-        assert!(plain.contains("fable"), "fable row missing: {plain}");
-        assert!(plain.contains("51%"), "fable pct missing: {plain}");
-        // Its own row, under the weekly one.
-        let rows: Vec<&str> = plain.lines().collect();
-        let weekly = rows.iter().position(|l| l.contains("weekly")).unwrap();
-        let fable_row = rows.iter().position(|l| l.contains("fable")).unwrap();
-        assert_eq!(fable_row, weekly + 1, "fable should follow weekly: {plain}");
-    }
-
-    #[test]
     fn test_render_fable_inline_condensed_stays_single_line() {
         // 95% pins the slot, so this doesn't ride on where the rotation is.
         let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
@@ -1900,7 +1501,7 @@ mod tests {
     #[test]
     fn test_render_no_fable_row_when_absent() {
         let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
-        for layout in [Layout::Comfortable, Layout::Condensed] {
+        for layout in [Layout::Condensed, Layout::Condensed] {
             let plain = strip_ansi(&render(
                 &input,
                 None,
@@ -1934,11 +1535,11 @@ mod tests {
                 0,
                 None,
                 mode,
-                Layout::Comfortable,
-                fable(51),
+                Layout::Condensed,
+                fable(95),
                 None,
             ));
-            assert!(plain.contains("51%"), "{mode:?}: {plain}");
+            assert!(plain.contains("95%"), "{mode:?}: {plain}");
         }
     }
 
@@ -1947,7 +1548,7 @@ mod tests {
         // No rate_limits block → API billing → no plan windows at all, so a
         // stale fable file must not sneak a row in.
         let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
-        for layout in [Layout::Comfortable, Layout::Condensed] {
+        for layout in [Layout::Condensed, Layout::Condensed] {
             let plain = strip_ansi(&render(
                 &input,
                 None,
@@ -2159,7 +1760,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -2167,28 +1768,6 @@ mod tests {
     }
 
     // ── Cost rendering ────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_render_cost_comfortable_present() {
-        let json = r#"{"cost": {"total_cost_usd": 0.1298}}"#;
-        let input: Input = serde_json::from_str(json).unwrap();
-        let plain = strip_ansi(&render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        ));
-        assert!(
-            plain.contains("$0.13"),
-            "cost should render with 2 decimals"
-        );
-        assert!(plain.contains("💰"), "cost glyph should render");
-    }
 
     #[test]
     fn test_render_cost_condensed_present() {
@@ -2220,7 +1799,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -2237,7 +1816,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -2257,7 +1836,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
@@ -2273,7 +1852,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
@@ -2289,7 +1868,7 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
@@ -2305,39 +1884,11 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         );
         assert!(out.contains(fmt::RED));
-    }
-
-    #[test]
-    fn test_render_api_billing_fixture_comfortable() {
-        let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        );
-        let plain = strip_ansi(&out);
-        assert!(plain.contains("Opus 4.7"), "model should render");
-        assert!(plain.contains("3%"), "context % should render");
-        assert!(plain.contains("$0.10"), "cost should render");
-        assert!(
-            !plain.contains("current"),
-            "no rate-limit row on API billing"
-        );
-        assert!(
-            !plain.contains("weekly"),
-            "no weekly rate-limit row on API billing"
-        );
     }
 
     #[test]
@@ -2397,25 +1948,6 @@ mod tests {
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
 
-        let comfortable = strip_ansi(&render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Comfortable,
-            None,
-            None,
-        ));
-        assert!(
-            !comfortable.contains("$3.14"),
-            "cost must not render on plan billing (comfortable)"
-        );
-        assert!(!comfortable.contains("💰"));
-        // Plan-side fields still render.
-        assert!(comfortable.contains("current"));
-
         let condensed = strip_ansi(&render(
             &input,
             None,
@@ -2429,36 +1961,10 @@ mod tests {
         ));
         assert!(
             !condensed.contains("$3.14"),
-            "cost must not render on plan billing (condensed)"
+            "cost must not render on plan billing"
         );
         assert!(!condensed.contains("💰"));
         assert!(condensed.contains("5h"));
-    }
-
-    #[test]
-    fn test_render_agent_badge_present_when_agent_type_set() {
-        let json = r#"{
-            "cwd": "/tmp",
-            "agent": {"name": "claude"},
-            "agent_type": "claude",
-            "model": {"display_name": "Opus 4.7"}
-        }"#;
-        let input: Input = serde_json::from_str(json).unwrap();
-        let out = strip_ansi(&render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::default(),
-            Layout::Comfortable,
-            None,
-            None,
-        ));
-        assert!(
-            out.starts_with("🤖"),
-            "agent badge should be leftmost segment, got: {out:?}"
-        );
     }
 
     #[test]
@@ -2471,7 +1977,7 @@ mod tests {
             0,
             None,
             RoundingMode::default(),
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -2524,7 +2030,7 @@ mod tests {
             0,
             None,
             RoundingMode::default(),
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));
@@ -2550,7 +2056,7 @@ mod tests {
             0,
             None,
             RoundingMode::default(),
-            Layout::Comfortable,
+            Layout::Condensed,
             None,
             None,
         ));

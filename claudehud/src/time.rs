@@ -1,9 +1,3 @@
-#[derive(Clone, Copy)]
-pub enum ResetStyle {
-    Time,
-    DateTime,
-}
-
 /// Parse ISO 8601 datetime string to Unix epoch seconds. No external deps.
 /// Handles: YYYY-MM-DDTHH:MM:SS[.fff][Z|+HH:MM|-HH:MM]
 pub fn parse_iso8601(s: &str) -> Option<u64> {
@@ -79,40 +73,6 @@ pub fn format_countdown(secs: u64) -> String {
         format!("{}m", secs / 60)
     } else {
         "<1m".to_string()
-    }
-}
-
-/// Format epoch as local time.
-pub fn format_reset_time(epoch: u64, style: ResetStyle) -> String {
-    use time::{OffsetDateTime, UtcOffset};
-
-    let offset = UtcOffset::local_offset_at(
-        OffsetDateTime::from_unix_timestamp(epoch as i64).unwrap_or(OffsetDateTime::UNIX_EPOCH),
-    )
-    .unwrap_or(UtcOffset::UTC);
-
-    let dt = OffsetDateTime::from_unix_timestamp(epoch as i64)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .to_offset(offset);
-
-    let hour = dt.hour();
-    let min = dt.minute();
-    let ampm = if hour >= 12 { "pm" } else { "am" };
-    let h12 = match hour % 12 {
-        0 => 12,
-        h => h,
-    };
-
-    match style {
-        ResetStyle::Time => format!("{h12}:{min:02}{ampm}"),
-        ResetStyle::DateTime => {
-            const MONTHS: [&str; 12] = [
-                "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
-            ];
-            let month = MONTHS[dt.month() as usize - 1];
-            let day = dt.day();
-            format!("{month} {day}, {h12}:{min:02}{ampm}")
-        }
     }
 }
 

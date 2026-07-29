@@ -90,7 +90,7 @@ fn test_e2e_single_ongoing_incident() {
         total,
         None,
         claudehud::render::RoundingMode::Floor,
-        claudehud::render::Layout::Comfortable,
+        claudehud::render::Layout::Condensed,
         None,
         None,
     );
@@ -145,7 +145,7 @@ fn test_e2e_two_ongoing_incidents() {
         total,
         None,
         claudehud::render::RoundingMode::Floor,
-        claudehud::render::Layout::Comfortable,
+        claudehud::render::Layout::Condensed,
         None,
         None,
     );
@@ -189,7 +189,7 @@ fn test_e2e_overflow_shows_plus_n_more() {
         total,
         None,
         claudehud::render::RoundingMode::Floor,
-        claudehud::render::Layout::Comfortable,
+        claudehud::render::Layout::Condensed,
         None,
         None,
     );
@@ -216,7 +216,7 @@ fn test_e2e_no_incident_mmap_absent() {
         total,
         None,
         claudehud::render::RoundingMode::Floor,
-        claudehud::render::Layout::Comfortable,
+        claudehud::render::Layout::Condensed,
         None,
         None,
     );

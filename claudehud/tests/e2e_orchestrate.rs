@@ -117,7 +117,7 @@ fn test_e2e_stdin_to_hud_all_segments_injected() {
         &env,
         Options {
             rounding: RoundingMode::Floor,
-            layout: Layout::Comfortable,
+            layout: Layout::Condensed,
         },
     );
     let plain = strip_ansi(&out);
@@ -152,7 +152,7 @@ fn test_e2e_empty_stdin_yields_bare_claude() {
         &env,
         Options {
             rounding: RoundingMode::Floor,
-            layout: Layout::Comfortable,
+            layout: Layout::Condensed,
         },
     );
     assert_eq!(out, "Claude");
