@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use claudehud::input::Input;
 use claudehud::orchestrate::{run, Env, Options};
-use claudehud::render::{Layout, RoundingMode};
+use claudehud::render::RoundingMode;
 use common::incidents::{Incident, Severity};
 
 fn strip_ansi(s: &str) -> String {
@@ -117,7 +117,6 @@ fn test_e2e_stdin_to_hud_all_segments_injected() {
         &env,
         Options {
             rounding: RoundingMode::Floor,
-            layout: Layout::Comfortable,
         },
     );
     let plain = strip_ansi(&out);
@@ -152,7 +151,6 @@ fn test_e2e_empty_stdin_yields_bare_claude() {
         &env,
         Options {
             rounding: RoundingMode::Floor,
-            layout: Layout::Comfortable,
         },
     );
     assert_eq!(out, "Claude");
@@ -172,7 +170,6 @@ fn test_e2e_condensed_layout_is_single_line() {
         &env,
         Options {
             rounding: RoundingMode::Floor,
-            layout: Layout::Condensed,
         },
     );
     assert!(

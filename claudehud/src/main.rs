@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use claudehud::orchestrate::{self, Options, SystemEnv};
 use claudehud::render::RoundingMode;
-use claudehud::{install, render, update};
+use claudehud::{install, update};
 
 const HELP: &str = "\
 claudehud — statusline renderer for Claude Code
@@ -26,7 +26,6 @@ GLOBAL OPTIONS:
   -h, --help                     Print this help
 
 ENVIRONMENT:
-  CLAUDEHUD_LAYOUT               Render layout: comfortable (default) or condensed.
   CLAUDEHUD_LOG                  Path; appends each stdin JSON payload here for
                                  debugging the render path.
   CLAUDEHUD_CACHE_DIR            Override the cache directory holding mmap files
@@ -100,19 +99,6 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
         }
     };
 
-    let layout = match std::env::var("CLAUDEHUD_LAYOUT") {
-        Ok(s) if !s.is_empty() => match render::Layout::parse(&s) {
-            Some(l) => l,
-            None => {
-                eprintln!(
-                    "claudehud: unknown CLAUDEHUD_LAYOUT '{s}' (want: comfortable|condensed)"
-                );
-                render::Layout::default()
-            }
-        },
-        _ => render::Layout::default(),
-    };
-
     // Thin adapter: read real stdin, then hand the raw payload + the live
     // environment (real git cache/registration, incident mmap, on-disk notice
     // read against the wall clock) to the orchestration. All decisions live in
@@ -121,7 +107,7 @@ fn render(mut args: pico_args::Arguments) -> ExitCode {
     io::stdin().read_to_string(&mut raw).unwrap_or(0);
     log_stdin(&raw);
 
-    let hud = orchestrate::run(&raw, &SystemEnv, Options { rounding, layout });
+    let hud = orchestrate::run(&raw, &SystemEnv, Options { rounding });
     print!("{hud}");
     ExitCode::SUCCESS
 }
