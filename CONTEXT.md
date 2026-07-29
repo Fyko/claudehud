@@ -24,16 +24,13 @@ A single `│`-delimited piece of the HUD's first line — e.g. the model segmen
 _Avoid_: field, part
 
 **Rate-limit row**:
-A rate-limit bar shown on its own line in the comfortable layout (`current`, `weekly`, `fable`). Collapses to an inline **rate-limit segment** in the condensed layout.
+A rate-limit window (`5h`, `7d`, `fable`) rendered as a bar plus a countdown in the rotating slot at the end of the line.
 
 **Fable cap**:
 The weekly-scoped Fable usage window. Unlike the other two rows it isn't in the stdin payload — the daemon polls `/api/oauth/usage` with Claude Code's OAuth token and writes `/tmp/clhud-fable` for the client. Opt-in via `fable=true` in the daemon config.
 
 **Incident line**:
 The hyperlinked line rendered below line 1 when status.claude.com reports an active incident or in-progress maintenance. Not a segment.
-
-**Layout**:
-The render mode — `comfortable` (multi-line, default) or `condensed` (single line). Set via `CLAUDEHUD_LAYOUT`.
 
 **Registration marker**:
 The file the client writes under `/tmp/clhud-watch/{hash}` to register a repo for watching; the daemon watches that directory and picks it up. To "register" a repo is to write this marker.

@@ -20,7 +20,7 @@ use common::fable::FableLimit;
 use common::incidents::Incident;
 
 use crate::input::Input;
-use crate::render::{self, Layout, RoundingMode};
+use crate::render::{self, RoundingMode};
 
 /// The injectable environment the orchestration reads from. Static dispatch
 /// (one generic param on [`run`]) keeps the real path zero-cost while letting
@@ -55,7 +55,6 @@ pub trait Env {
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
     pub rounding: RoundingMode,
-    pub layout: Layout,
 }
 
 /// Run the stdin→HUD orchestration: raw JSON in, rendered HUD string out.
@@ -91,7 +90,6 @@ pub fn run<E: Env>(raw: &str, env: &E, options: Options) -> String {
         total_active,
         update_notice.as_deref(),
         options.rounding,
-        options.layout,
         fable,
         auto_compact,
     )
@@ -158,7 +156,6 @@ mod tests {
     fn opts() -> Options {
         Options {
             rounding: RoundingMode::Floor,
-            layout: Layout::Condensed,
         }
     }
 

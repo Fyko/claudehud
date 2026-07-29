@@ -10,7 +10,7 @@ use crate::input::Input;
 use crate::time::{format_countdown, format_duration};
 
 /// Incidents at or beyond this age are treated as "long-running": filtered out of
-/// the normal list (collapsed to a breadcrumb in comfortable, hidden in condensed).
+/// the normal list (collapsed to a `+N ongoing (24h+)` breadcrumb).
 const LONG_RUNNING_SECS: u64 = 86_400;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,21 +41,6 @@ impl RoundingMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Layout {
-    #[default]
-    Condensed,
-}
-
-impl Layout {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "condensed" => Some(Self::Condensed),
-            _ => None,
-        }
-    }
-}
-
 // One flat argument list rather than a params struct: every caller is either
 // `orchestrate::run` or a test that wants to vary exactly one of these.
 // `git` comes in owned because no caller wants it back; borrowing would only
@@ -64,32 +49,6 @@ impl Layout {
 pub fn render(
     input: &Input,
     git: Option<(String, bool)>,
-    incidents: &[Incident],
-    total_active: u8,
-    update_notice: Option<&str>,
-    rounding: RoundingMode,
-    layout: Layout,
-    fable: Option<FableLimit>,
-    auto_compact: Option<u64>,
-) -> String {
-    match layout {
-        Layout::Condensed => render_condensed(
-            input,
-            git.as_ref(),
-            incidents,
-            total_active,
-            update_notice,
-            rounding,
-            fable,
-            auto_compact,
-        ),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_condensed(
-    input: &Input,
-    git: Option<&(String, bool)>,
     incidents: &[Incident],
     total_active: u8,
     update_notice: Option<&str>,
@@ -114,7 +73,7 @@ fn render_condensed(
 
     // ── Dir + git (tight) ──────────────────────────────────
     out.push_str(SEP);
-    push_dir_branch(input, git, true, &mut out);
+    push_dir_branch(input, git.as_ref(), true, &mut out);
 
     // ── Rate limits: one rotating slot ─────────────────────
     // Three windows side by side ate ~84 columns. One at a time buys a full
@@ -562,7 +521,6 @@ mod tests {
             0,
             Some("0.2.0"),
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         );
@@ -573,17 +531,7 @@ mod tests {
     #[test]
     fn test_render_no_update_notice_absent() {
         let input = Input::default();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         assert!(!strip_ansi(&out).contains("updated to"));
     }
 
@@ -597,7 +545,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -615,7 +562,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -650,7 +596,6 @@ mod tests {
             2,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         );
@@ -671,7 +616,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         );
@@ -723,7 +667,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -748,7 +691,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None
         ))
@@ -760,7 +702,6 @@ mod tests {
             0,
             None,
             RoundingMode::Ceiling,
-            Layout::Condensed,
             None,
             None
         ))
@@ -772,21 +713,10 @@ mod tests {
             0,
             None,
             RoundingMode::Nearest,
-            Layout::Condensed,
             None,
             None
         ))
         .contains("50%"));
-    }
-
-    #[test]
-    fn test_layout_parse() {
-        assert_eq!(Layout::parse("condensed"), Some(Layout::Condensed));
-        assert_eq!(Layout::parse("comfortable"), None);
-        assert_eq!(Layout::parse("Condensed"), Some(Layout::Condensed));
-        assert_eq!(Layout::parse(""), None);
-        assert_eq!(Layout::parse("compact"), None);
-        assert_eq!(Layout::parse("garbage"), None);
     }
 
     // ── Condensed layout tests ────────────────────────────────────────────────
@@ -794,17 +724,7 @@ mod tests {
     #[test]
     fn test_render_default_model_condensed() {
         let input = Input::default();
-        let result = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let result = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"), "default model name should render");
     }
@@ -820,7 +740,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -842,7 +761,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -852,7 +770,7 @@ mod tests {
         );
         assert!(
             !plain.contains("myproject (main)"),
-            "comfortable spacing should not appear"
+            "the usage block must stay inline"
         );
     }
 
@@ -865,17 +783,7 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let result = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         let plain = strip_ansi(&result);
 
         // Exactly one window holds the slot — never both at once.
@@ -885,7 +793,7 @@ mod tests {
 
         assert!(
             !plain.contains("current") && !plain.contains("weekly"),
-            "comfortable labels should not appear: {plain}"
+            "rate rows must stay inline: {plain}"
         );
 
         // A full-width bar, now that there's room for one.
@@ -918,7 +826,6 @@ mod tests {
             1,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         );
@@ -957,7 +864,6 @@ mod tests {
             1,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         );
@@ -972,23 +878,20 @@ mod tests {
     #[test]
     fn test_fresh_incident_still_normal_both_layouts() {
         // <24h renders as a normal line in either layout.
-        for layout in [Layout::Condensed, Layout::Condensed] {
-            let inc = incident_aged("Elevated API errors", 12 * 60);
-            let out = render(
-                &Input::default(),
-                None,
-                &[inc],
-                1,
-                None,
-                RoundingMode::Floor,
-                layout,
-                None,
-                None,
-            );
-            let plain = strip_ansi(&out);
-            assert!(plain.contains("Elevated API errors"), "{layout:?}: {plain}");
-            assert!(plain.contains("started 12m ago"), "{layout:?}: {plain}");
-        }
+        let inc = incident_aged("Elevated API errors", 12 * 60);
+        let out = render(
+            &Input::default(),
+            None,
+            &[inc],
+            1,
+            None,
+            RoundingMode::Floor,
+            None,
+            None,
+        );
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("Elevated API errors"), "{plain}");
+        assert!(plain.contains("started 12m ago"), "{plain}");
     }
 
     #[test]
@@ -1026,7 +929,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1047,7 +949,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1068,7 +969,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1080,20 +980,17 @@ mod tests {
     fn test_render_fast_mode_glyph_precedes_model() {
         let json = r#"{"model": {"display_name": "Opus 5"}, "fast_mode": true, "effort": {"level": "high"}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        for layout in [Layout::Condensed, Layout::Condensed] {
-            let plain = strip_ansi(&render(
-                &input,
-                None,
-                &[],
-                0,
-                None,
-                RoundingMode::Floor,
-                layout,
-                None,
-                None,
-            ));
-            assert!(plain.starts_with("⚡ Opus 5 high"), "{layout:?}: {plain}");
-        }
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            None,
+            None,
+        ));
+        assert!(plain.starts_with("⚡ Opus 5 high"), "{plain}");
     }
 
     #[test]
@@ -1110,7 +1007,6 @@ mod tests {
                 0,
                 None,
                 RoundingMode::Floor,
-                Layout::Condensed,
                 None,
                 None,
             ));
@@ -1131,7 +1027,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1151,7 +1046,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1172,7 +1066,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1193,7 +1086,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1207,22 +1099,19 @@ mod tests {
             incident_aged("Older thing", 50 * 3600),
             incident_aged("Fresh thing", 5 * 60),
         ];
-        for layout in [Layout::Condensed, Layout::Condensed] {
-            let plain = strip_ansi(&render(
-                &Input::default(),
-                None,
-                &incidents,
-                3,
-                None,
-                RoundingMode::Floor,
-                layout,
-                None,
-                None,
-            ));
-            assert!(plain.contains("Fresh thing"), "{layout:?}: {plain}");
-            assert!(!plain.contains("Old thing"), "{layout:?}: {plain}");
-            assert!(plain.contains("+2 ongoing (24h+)"), "{layout:?}: {plain}");
-        }
+        let plain = strip_ansi(&render(
+            &Input::default(),
+            None,
+            &incidents,
+            3,
+            None,
+            RoundingMode::Floor,
+            None,
+            None,
+        ));
+        assert!(plain.contains("Fresh thing"), "{plain}");
+        assert!(!plain.contains("Old thing"), "{plain}");
+        assert!(plain.contains("+2 ongoing (24h+)"), "{plain}");
     }
 
     // ── Context window vs the auto-compact budget ─────────────────────────────
@@ -1331,21 +1220,18 @@ mod tests {
     #[test]
     fn test_context_segment_is_labelled_not_emoji() {
         let input: Input = serde_json::from_str(BIG_WINDOW).unwrap();
-        for layout in [Layout::Condensed, Layout::Condensed] {
-            let plain = strip_ansi(&render(
-                &input,
-                None,
-                &[],
-                0,
-                None,
-                RoundingMode::Floor,
-                layout,
-                None,
-                None,
-            ));
-            assert!(plain.contains("ctx 3%"), "{layout:?}: {plain}");
-            assert!(!plain.contains('✍'), "{layout:?}: {plain}");
-        }
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            None,
+            None,
+        ));
+        assert!(plain.contains("ctx 3%"), "{plain}");
+        assert!(!plain.contains('✍'), "{plain}");
     }
 
     // ── Rotating usage slot ───────────────────────────────────────────────────
@@ -1488,7 +1374,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             fable(95),
             None,
         );
@@ -1501,21 +1386,18 @@ mod tests {
     #[test]
     fn test_render_no_fable_row_when_absent() {
         let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
-        for layout in [Layout::Condensed, Layout::Condensed] {
-            let plain = strip_ansi(&render(
-                &input,
-                None,
-                &[],
-                0,
-                None,
-                RoundingMode::Floor,
-                layout,
-                None,
-                None,
-            ));
-            assert!(!plain.contains("fable"), "{layout:?}: {plain}");
-            assert!(!plain.contains("fbl"), "{layout:?}: {plain}");
-        }
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            None,
+            None,
+        ));
+        assert!(!plain.contains("fable"), "{plain}");
+        assert!(!plain.contains("fbl"), "{plain}");
     }
 
     #[test]
@@ -1528,17 +1410,7 @@ mod tests {
             RoundingMode::Ceiling,
             RoundingMode::Nearest,
         ] {
-            let plain = strip_ansi(&render(
-                &input,
-                None,
-                &[],
-                0,
-                None,
-                mode,
-                Layout::Condensed,
-                fable(95),
-                None,
-            ));
+            let plain = strip_ansi(&render(&input, None, &[], 0, None, mode, fable(95), None));
             assert!(plain.contains("95%"), "{mode:?}: {plain}");
         }
     }
@@ -1548,21 +1420,18 @@ mod tests {
         // No rate_limits block → API billing → no plan windows at all, so a
         // stale fable file must not sneak a row in.
         let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
-        for layout in [Layout::Condensed, Layout::Condensed] {
-            let plain = strip_ansi(&render(
-                &input,
-                None,
-                &[],
-                0,
-                None,
-                RoundingMode::Floor,
-                layout,
-                fable(51),
-                None,
-            ));
-            assert!(!plain.contains("fable"), "{layout:?}: {plain}");
-            assert!(!plain.contains("fbl"), "{layout:?}: {plain}");
-        }
+        let plain = strip_ansi(&render(
+            &input,
+            None,
+            &[],
+            0,
+            None,
+            RoundingMode::Floor,
+            fable(51),
+            None,
+        ));
+        assert!(!plain.contains("fable"), "{plain}");
+        assert!(!plain.contains("fbl"), "{plain}");
     }
 
     #[test]
@@ -1581,7 +1450,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1591,17 +1459,7 @@ mod tests {
     #[test]
     fn test_render_condensed_no_rate_limits() {
         let input = Input::default();
-        let result = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let result = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         let plain = strip_ansi(&result);
         assert!(plain.contains("Claude"));
         assert!(!plain.contains("5h"));
@@ -1617,17 +1475,7 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let result = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         let plain = strip_ansi(&result);
         assert!(plain.contains("5h"));
         assert!(plain.contains("9%"));
@@ -1642,17 +1490,7 @@ mod tests {
             }
         }"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let result = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let result = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         let plain = strip_ansi(&result);
         assert!(plain.contains("7d"));
         assert!(plain.contains("12%"));
@@ -1669,7 +1507,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         );
@@ -1700,7 +1537,6 @@ mod tests {
             3,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         );
@@ -1712,17 +1548,7 @@ mod tests {
     #[test]
     fn test_render_real_stdin_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::REAL_STDIN_FIXTURE).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"), "model name should render");
         assert!(
@@ -1732,14 +1558,8 @@ mod tests {
         assert!(plain.contains("project"), "cwd dirname should render");
         let shown = ["5h", "7d"].iter().filter(|l| plain.contains(**l)).count();
         assert_eq!(shown, 1, "one rotating window, got: {plain}");
-        assert!(
-            !plain.contains("current"),
-            "comfortable label should not appear"
-        );
-        assert!(
-            !plain.contains("weekly"),
-            "comfortable label should not appear"
-        );
+        assert!(!plain.contains("current"), "rate rows must stay inline");
+        assert!(!plain.contains("weekly"), "rate rows must stay inline");
         assert!(
             !out.contains('\n'),
             "fixture has no incidents → single-line output"
@@ -1760,7 +1580,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1780,7 +1599,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1799,7 +1617,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1816,7 +1633,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1829,82 +1645,32 @@ mod tests {
         // < $1 → green
         let json = r#"{"cost": {"total_cost_usd": 0.5}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         assert!(out.contains(fmt::GREEN));
 
         // $1 ≤ x < $5 → yellow
         let json = r#"{"cost": {"total_cost_usd": 2.5}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         assert!(out.contains(fmt::YELLOW));
 
         // $5 ≤ x < $20 → orange
         let json = r#"{"cost": {"total_cost_usd": 12.0}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         assert!(out.contains(fmt::ORANGE));
 
         // ≥ $20 → red
         let json = r#"{"cost": {"total_cost_usd": 42.0}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         assert!(out.contains(fmt::RED));
     }
 
     #[test]
     fn test_render_api_billing_fixture_condensed() {
         let input: Input = serde_json::from_str(crate::input::API_BILLING_FIXTURE).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         let plain = strip_ansi(&out);
         assert!(plain.contains("Opus 4.7"));
         assert!(plain.contains("$0.10"));
@@ -1917,17 +1683,7 @@ mod tests {
     fn test_render_cost_condensed_single_line() {
         let json = r#"{"cost": {"total_cost_usd": 0.42}}"#;
         let input: Input = serde_json::from_str(json).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            Layout::Condensed,
-            None,
-            None,
-        );
+        let out = render(&input, None, &[], 0, None, RoundingMode::Floor, None, None);
         assert!(
             !out.contains('\n'),
             "condensed layout must stay single-line"
@@ -1955,7 +1711,6 @@ mod tests {
             0,
             None,
             RoundingMode::Floor,
-            Layout::Condensed,
             None,
             None,
         ));
@@ -1977,7 +1732,6 @@ mod tests {
             0,
             None,
             RoundingMode::default(),
-            Layout::Condensed,
             None,
             None,
         ));
@@ -2002,7 +1756,6 @@ mod tests {
             0,
             None,
             RoundingMode::default(),
-            Layout::Condensed,
             None,
             None,
         ));
@@ -2030,7 +1783,6 @@ mod tests {
             0,
             None,
             RoundingMode::default(),
-            Layout::Condensed,
             None,
             None,
         ));
@@ -2056,7 +1808,6 @@ mod tests {
             0,
             None,
             RoundingMode::default(),
-            Layout::Condensed,
             None,
             None,
         ));
