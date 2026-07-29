@@ -132,4 +132,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/* --generate-notes
+        run: |
+          # Both installers resolve /releases/latest, which skips prereleases —
+          # so an -rc tag can be published without anyone installing it.
+          flags=()
+          case "$TAG" in *-rc*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" dist/* --generate-notes "${flags[@]}"
