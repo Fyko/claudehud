@@ -78,7 +78,7 @@ pub fn render(
     // ── Rate limits: one rotating slot ─────────────────────
     // Three windows side by side ate ~84 columns. One at a time buys a full
     // 10-dot bar and a countdown, and the slot cycles so the others still get
-    // seen — except when something is nearly spent, which pins the slot.
+    // seen.
     let windows = rate_windows(input, rounding, fable);
     if let Some(w) = pick_window(&windows, now_secs()) {
         out.push_str(SEP);
@@ -103,10 +103,6 @@ struct RateWindow {
 
 /// How long the rotating slot holds one window before moving on.
 const ROTATE_SECS: u64 = 8;
-
-/// At or above this, a window stops taking its turn and holds the slot: when
-/// you're nearly out, hiding it for 16 seconds is the wrong trade.
-const PIN_PCT: u8 = 90;
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -147,21 +143,13 @@ fn rate_windows(
     out
 }
 
-/// Which window gets the slot right now: the most-spent one once anything
-/// crosses [`PIN_PCT`], otherwise a plain time-sliced rotation.
+/// Which window gets the slot right now: a plain time-sliced rotation.
 ///
 /// The rotation is derived from the clock rather than a counter, so it needs no
 /// state on disk and every open session lands on the same window at the same
 /// moment. Claude Code re-runs the statusline often enough that the slot turns
 /// over on its own.
 fn pick_window(windows: &[RateWindow], now: u64) -> Option<RateWindow> {
-    let pinned = windows
-        .iter()
-        .filter(|w| w.pct >= PIN_PCT)
-        .max_by_key(|w| w.pct);
-    if let Some(w) = pinned {
-        return Some(*w);
-    }
     windows
         .get((now / ROTATE_SECS) as usize % windows.len().max(1))
         .copied()
@@ -1266,25 +1254,11 @@ mod tests {
     }
 
     #[test]
-    fn test_pick_window_pins_a_nearly_spent_window() {
-        let ws = [win("5h", PIN_PCT), win("7d", 20), win("fbl", 30)];
-        // Every point in the cycle, same answer — the rotation stops.
-        for t in [0, ROTATE_SECS, 2 * ROTATE_SECS, 5 * ROTATE_SECS] {
-            assert_eq!(pick_window(&ws, t).unwrap().label, "5h", "t={t}");
-        }
-    }
-
-    #[test]
-    fn test_pick_window_pins_the_worst_of_several_over_the_line() {
-        let ws = [win("5h", 91), win("7d", 20), win("fbl", 99)];
-        assert_eq!(pick_window(&ws, 0).unwrap().label, "fbl");
-    }
-
-    #[test]
-    fn test_pick_window_just_below_the_pin_still_rotates() {
-        let ws = [win("5h", PIN_PCT - 1), win("7d", 20)];
+    fn test_pick_window_rotates_even_when_nearly_spent() {
+        let ws = [win("5h", 99), win("7d", 20), win("fbl", 30)];
         assert_eq!(pick_window(&ws, 0).unwrap().label, "5h");
         assert_eq!(pick_window(&ws, ROTATE_SECS).unwrap().label, "7d");
+        assert_eq!(pick_window(&ws, 2 * ROTATE_SECS).unwrap().label, "fbl");
     }
 
     #[test]
@@ -1365,18 +1339,13 @@ mod tests {
 
     #[test]
     fn test_render_fable_inline_condensed_stays_single_line() {
-        // 95% pins the slot, so this doesn't ride on where the rotation is.
+        // The slot always rotates, so drive the fable window directly rather
+        // than betting on where the wall clock lands.
         let input: Input = serde_json::from_str(RATE_LIMITED).unwrap();
-        let out = render(
-            &input,
-            None,
-            &[],
-            0,
-            None,
-            RoundingMode::Floor,
-            fable(95),
-            None,
-        );
+        let ws = rate_windows(&input, RoundingMode::Floor, fable(95));
+        let fbl = ws.iter().find(|w| w.label == "fbl").expect("fable window");
+        let mut out = String::new();
+        push_rate_rotating(*fbl, 0, &mut out);
         let plain = strip_ansi(&out);
         assert!(plain.contains("fbl"), "fable label missing: {plain}");
         assert!(plain.contains("95%"), "fable pct missing: {plain}");
@@ -1410,8 +1379,9 @@ mod tests {
             RoundingMode::Ceiling,
             RoundingMode::Nearest,
         ] {
-            let plain = strip_ansi(&render(&input, None, &[], 0, None, mode, fable(95), None));
-            assert!(plain.contains("95%"), "{mode:?}: {plain}");
+            let ws = rate_windows(&input, mode, fable(95));
+            let fbl = ws.iter().find(|w| w.label == "fbl").expect("fable window");
+            assert_eq!(fbl.pct, 95, "{mode:?}");
         }
     }
 
